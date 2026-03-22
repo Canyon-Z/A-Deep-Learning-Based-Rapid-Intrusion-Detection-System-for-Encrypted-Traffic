@@ -1,0 +1,18 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Train Model",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"run.py",
+				"--mode",
+				"train"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}
