@@ -1,95 +1,77 @@
 import numpy as np
-from scapy.all import rdpcap
-from scapy.layers.inet import IP
-from scapy.layers.inet import TCP, UDP
+from scapy.all import PcapReader, IP, TCP, UDP
 
 class FeatureExtractor:
-    def __init__(self, target_seq_len=100):
-        self.target_seq_len = target_seq_len
-    
-    def extract_features(self, pcap_file):
+    def __init__(self, truncate_len=784):
+        self.truncate_len = truncate_len
+
+    def pcap_to_sessions(self, pcap_file):
         """
-        Main function to extract features from a pcap file.
-        Returns a processed numpy array suitable for model input.
+        Phase 1: Traffic Splitting (Session + All Layers)
+        Reads a pcap file and splits traffic into sessions based on 5-tuple.
+        Returns a dictionary of sessions: {5-tuple: raw_bytes}
         """
-        packets = rdpcap(pcap_file)
+        sessions = {}
+        timestamps = {}
+        try:
+            # Using PcapReader to iterate packet by packet (memory efficient)
+            with PcapReader(pcap_file) as packets:
+                for pkt in packets:
+                    if IP in pkt:
+                        src_ip = pkt[IP].src
+                        dst_ip = pkt[IP].dst
+                        proto = pkt[IP].proto
+                        
+                        sport = 0
+                        dport = 0
+                        
+                        if TCP in pkt:
+                            sport = pkt[TCP].sport
+                            dport = pkt[TCP].dport
+                        elif UDP in pkt:
+                            sport = pkt[UDP].sport
+                            dport = pkt[UDP].dport
+                        
+                        # Five-tuple key for session (bidirectional)
+                        # Sorting IP/Port pairs ensures A->B and B->A are mapped to the same session
+                        # Session key: (LowIP, LowPort, HighIP, HighPort, Proto)
+                        if src_ip <= dst_ip:
+                             key = (src_ip, sport, dst_ip, dport, proto)
+                        else:
+                             key = (dst_ip, dport, src_ip, sport, proto)
+
+                        if key not in sessions:
+                            sessions[key] = b''
+                            timestamps[key] = float(pkt.time) # Record start time of session
+                        
+                        # "Session + all layers": Concatenate raw packet bytes
+                        # This includes headers (Ethernet/IP/TCP etc.) + Payload
+                        sessions[key] += bytes(pkt)
+        except Exception as e:
+            print(f"Error reading {pcap_file}: {e}")
+            
+        return sessions, timestamps
+
+    def process_session(self, session_bytes):
+        """
+        Phase 2: Traffic Cleaning/Truncation (784 bytes)
+        Phase 3: Byte to Tensor Conversion (Preparation: numpy array)
+        """
+        # Truncate or Pad to 784 bytes
+        if len(session_bytes) >= self.truncate_len:
+            byte_data = session_bytes[:self.truncate_len]
+        else:
+            # Zero padding
+            byte_data = session_bytes + b'\x00' * (self.truncate_len - len(session_bytes))
+            
+        # Convert to numpy array (uint8) -> 0-255
+        img_array = np.frombuffer(byte_data, dtype=np.uint8)
         
-        features = []
-        prev_time = None
-        for pkt in packets:
-            if IP in pkt:
-                # Raw features: length, protocol, inter-arrival time, TCP flags, src port, dst port.
-                pkt_len = len(pkt)
-                proto = pkt[IP].proto
-                time = float(pkt.time)
-
-                if prev_time is None:
-                    iat = 0.0
-                else:
-                    iat = max(time - prev_time, 0.0)
-                prev_time = time
-
-                tcp_flags = 0
-                src_port = 0
-                dst_port = 0
-                if TCP in pkt:
-                    tcp_flags = int(pkt[TCP].flags)
-                    src_port = int(pkt[TCP].sport)
-                    dst_port = int(pkt[TCP].dport)
-                elif UDP in pkt:
-                    src_port = int(pkt[UDP].sport)
-                    dst_port = int(pkt[UDP].dport)
-
-                features.append([pkt_len, proto, iat, tcp_flags, src_port, dst_port])
-
-                if len(features) >= self.target_seq_len:
-                    break
-
-        # Pad if necessary
-        if len(features) < self.target_seq_len:
-            pad_len = self.target_seq_len - len(features)
-            for _ in range(pad_len):
-                features.append([0, 0, 0, 0, 0, 0])
-
-        arr = np.array(features, dtype=np.float32)
-        return self._normalize_features(arr)
-
-    def _normalize_features(self, features):
-        """
-        Normalize to a compact range so model logits are less likely to saturate.
-        Output shape keeps (seq_len, 6):
-        [pkt_len_norm, proto_norm, iat_norm, tcp_flags_norm, src_port_norm, dst_port_norm]
-        """
-        if features.size == 0:
-            return features
-
-        # Non-padded rows are treated as valid packets.
-        valid_mask = features[:, 0] > 0
-        normalized = np.zeros_like(features, dtype=np.float32)
-
-        if not np.any(valid_mask):
-            return normalized
-
-        pkt_len = np.clip(features[:, 0] / 1500.0, 0.0, 1.0)
-        proto = np.clip(features[:, 1] / 255.0, 0.0, 1.0)
-
-        # Inter-arrival time log scale; 1s is used as practical cap for normalization.
-        iat = np.log1p(np.maximum(features[:, 2], 0.0))
-        iat = np.clip(iat / np.log1p(1.0), 0.0, 1.0)
-
-        tcp_flags = np.clip(features[:, 3] / 255.0, 0.0, 1.0)
-        src_port = np.clip(features[:, 4] / 65535.0, 0.0, 1.0)
-        dst_port = np.clip(features[:, 5] / 65535.0, 0.0, 1.0)
-
-        normalized[:, 0] = pkt_len
-        normalized[:, 1] = proto
-        normalized[:, 2] = iat
-        normalized[:, 3] = tcp_flags
-        normalized[:, 4] = src_port
-        normalized[:, 5] = dst_port
-        normalized[~valid_mask] = 0.0
-        return normalized
-
-    def get_byte_distribution(self, payload):
-        # Placeholder for byte distribution logic
-        pass
+        # Reshape to 28x28 (Grayscale image format)
+        try:
+            img_array = img_array.reshape((28, 28))
+        except ValueError:
+            # Fallback if something went wrong with buffer size (shouldn't happen with padding logic)
+            img_array = np.zeros((28, 28), dtype=np.uint8)
+            
+        return img_array
