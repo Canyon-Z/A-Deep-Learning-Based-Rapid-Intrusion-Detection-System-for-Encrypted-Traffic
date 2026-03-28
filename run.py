@@ -32,7 +32,7 @@ def run_train():
     from src.models.cnn_bilstm import CNN_BiLSTM
 
     # Configuration
-    DATA_ROOT = "data_root"  # Path to your pcap folder
+    DATA_ROOT = "data/processed"  # Path to your processed images folder
     BATCH_SIZE = 32
     NUM_EPOCHS = 10
     LEARNING_RATE = 0.001

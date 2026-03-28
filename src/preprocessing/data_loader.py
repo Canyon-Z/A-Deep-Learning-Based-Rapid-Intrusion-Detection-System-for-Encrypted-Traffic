@@ -32,21 +32,66 @@ class TrafficDataset(Dataset):
 
     def __getitem__(self, idx):
         # Phase 3: Byte to Tensor Conversion (Tensor creation in Dataset)
-        img_array = self.data[idx]
-        label = self.labels[idx]
+        item = self.data[idx] 
+        label = self.labels[idx] 
         
-        # Convert numpy array to PIL Image (L = grayscale mode)
-        img = Image.fromarray(img_array, mode='L')
-        
-        if self.transform:
-            img_tensor = self.transform(img)
-        else:
-            # Basic conversion if no transform is provided
-            # Converts [0, 255] to [0.0, 1.0] and adds channel dimension -> (1, 28, 28)
-            img_tensor = torch.from_numpy(img_array).float() / 255.0
-            img_tensor = img_tensor.unsqueeze(0)
+        # Check if item is a file path or numpy array 
+        if isinstance(item, str): 
+            # Load image from file path using PIL 
+            img = Image.open(item).convert('L')  # Convert to grayscale 
+            if self.transform: 
+                img_tensor = self.transform(img) 
+            else: 
+                # Basic conversion if no transform is provided 
+                img_array = np.array(img) 
+                img_tensor = torch.from_numpy(img_array).float() / 255.0 
+                img_tensor = img_tensor.unsqueeze(0) 
+        else: 
+            # Handle numpy array 
+            img_array = item 
+            img = Image.fromarray(img_array, mode='L') 
+            if self.transform: 
+                img_tensor = self.transform(img) 
+            else: 
+                # Basic conversion if no transform is provided 
+                img_tensor = torch.from_numpy(img_array).float() / 255.0 
+                img_tensor = img_tensor.unsqueeze(0) 
             
-        return img_tensor, torch.tensor(label, dtype=torch.long)
+        return img_tensor, torch.tensor(label, dtype=torch.long) 
+    
+    def load_data(cls, data_dir): 
+        """ 
+        Load data from image files in the specified directory. 
+        Reads images from data/processed/Png or data/USTC-TFC2016/4_Png 
+        """ 
+        if not os.path.exists(data_dir): 
+            print(f"Data directory {data_dir} does not exist.") 
+            return [], [] 
+        
+        data_list = [] 
+        labels_list = [] 
+        
+        # Identify classes from subdirectories 
+        classes = [d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))] 
+        classes.sort()  # Ensure consistent ordering 
+        print(f"Found classes: {classes}") 
+        
+        class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)} 
+        
+        for cls_name in classes: 
+            cls_dir = os.path.join(data_dir, cls_name) 
+            img_files = glob.glob(os.path.join(cls_dir, '*.png')) + glob.glob(os.path.join(cls_dir, '*.jpg')) 
+            
+            label = class_to_idx[cls_name] 
+            print(f"Processing class '{cls_name}' from {cls_dir}...") 
+            
+            for img_file in tqdm(img_files, desc=f"Loading {cls_name}"): 
+                data_list.append(img_file) 
+                labels_list.append(label) 
+        
+        print(f"Loaded {len(data_list)} images from {data_dir}") 
+        return data_list, labels_list 
+
 
 def get_dataloaders(data_root, batch_size=32, truncate_len=784):
     """

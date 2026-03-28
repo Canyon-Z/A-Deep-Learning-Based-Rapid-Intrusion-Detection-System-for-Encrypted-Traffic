@@ -137,6 +137,8 @@ async def analyze_traffic(file: UploadFile = File(...)):
         max_malware_conf = 0.0
         malicious_session_image_b64 = None
         first_session_image_b64 = None
+        malicious_session_hist = None
+        first_session_hist = None
         
         transform = transforms.Compose([transforms.ToTensor()])
         
@@ -154,6 +156,10 @@ async def analyze_traffic(file: UploadFile = File(...)):
             
             # Convert Session Image to Base64 for Visualization
             try:
+                # Calculate True Payload Byte Distribution (16 bins: 0x00-0x0F, 0x10-0x1F, ...)
+                hist, _ = np.histogram(img_array.flatten(), bins=16, range=(0, 256))
+                hist_list = hist.tolist()
+
                 # Convert numpy (28,28) to PIL Image
                 pil_img = Image.fromarray(img_array, mode='L')
                 # Resize to (140, 140) for better visibility in web (5x scale)
@@ -164,9 +170,11 @@ async def analyze_traffic(file: UploadFile = File(...)):
                 
                 if total_sessions == 1:
                     first_session_image_b64 = img_str
+                    first_session_hist = hist_list
             except Exception as e:
                 print(f"Error converting image: {e}")
                 img_str = None
+                hist_list = None
             
             # Convert to Tensor (similar to DataLoader)
             img = Image.fromarray(img_array, mode='L')
@@ -197,16 +205,19 @@ async def analyze_traffic(file: UploadFile = File(...)):
                     # Capture the first malicious image found for display
                     if malicious_session_image_b64 is None and img_str:
                         malicious_session_image_b64 = img_str
+                        malicious_session_hist = hist_list
 
         # Final Decision Logic
         if malware_count > 0:
             result_status = "Malicious Traffic Detected"
             final_conf = max_malware_conf
             display_image = malicious_session_image_b64
+            display_hist = malicious_session_hist
         else:
             result_status = "Benign Traffic"
             final_conf = 1.0 # Or average confidence of benign sessions
             display_image = first_session_image_b64 # Show the first session if nothing bad found
+            display_hist = first_session_hist
         
         end_time = time.time()
         elapsed_time = f"{(end_time - start_time):.4f}s"
@@ -217,21 +228,8 @@ async def analyze_traffic(file: UploadFile = File(...)):
             "details": f"Analyzed {total_sessions} sessions, {malware_count} flagged as malicious.",
             "execution_time": elapsed_time,
             "capture_time": session_start_time,
-            "image_data": display_image 
-        })
-
-        # Final Decision Logic
-        if malware_count > 0:
-            result_status = "Malicious Traffic Detected"
-            final_conf = max_malware_conf
-        else:
-            result_status = "Benign Traffic"
-            final_conf = 1.0 # Or average confidence of benign sessions
-            
-        return JSONResponse(content={
-            "status": result_status,
-            "confidence": f"{final_conf:.4f}",
-            "details": f"Analyzed {total_sessions} sessions, {malware_count} flagged as malicious."
+            "image_data": display_image,
+            "payload_dist": display_hist
         })
 
     except Exception as e:
