@@ -70,7 +70,30 @@ class TrafficDataset(Dataset):
         # Phase 3: Byte to Tensor Conversion (Tensor creation in Dataset)
         item = self.data[idx] 
         label = self.labels[idx] 
+        item = self.data[idx] 
+        label = self.labels[idx] 
         
+        # Check if item is a file path or numpy array 
+        if isinstance(item, str): 
+            # Load image from file path using PIL 
+            img = Image.open(item).convert('L')  # Convert to grayscale 
+            if self.transform: 
+                img_tensor = self.transform(img) 
+            else: 
+                # Basic conversion if no transform is provided 
+                img_array = np.array(img) 
+                img_tensor = torch.from_numpy(img_array).float() / 255.0 
+                img_tensor = img_tensor.unsqueeze(0) 
+        else: 
+            # Handle numpy array 
+            img_array = item 
+            img = Image.fromarray(img_array, mode='L') 
+            if self.transform: 
+                img_tensor = self.transform(img) 
+            else: 
+                # Basic conversion if no transform is provided 
+                img_tensor = torch.from_numpy(img_array).float() / 255.0 
+                img_tensor = img_tensor.unsqueeze(0) 
         # Check if item is a file path or numpy array 
         if isinstance(item, str): 
             # Load image from file path using PIL 

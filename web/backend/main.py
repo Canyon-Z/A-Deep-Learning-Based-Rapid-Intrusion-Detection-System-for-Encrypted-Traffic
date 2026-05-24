@@ -867,6 +867,7 @@ async def analyze_traffic(
             final_conf = float(np.mean(chosen_scores)) if chosen_scores else 0.0
             display_image = malicious_session_image_b64
             display_hist = malicious_session_hist
+            display_hist = malicious_session_hist
         else:
             result_status = "Benign Traffic"
             chosen_scores = benign_scores if benign_scores else predicted_scores
