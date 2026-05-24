@@ -1,0 +1,192 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap');
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: #0B0F1E;
+    color: #E2E8F0;
+    overflow-x: hidden;
+}
+
+.font-mono {
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: #0B0F1E; 
+}
+::-webkit-scrollbar-thumb {
+    background: #2A3447; 
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #00E5FF; 
+}
+
+/* Glassmorphism Card */
+.glass-card {
+    background: rgba(21, 27, 45, 0.7);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(42, 52, 71, 0.5);
+}
+    
+/* Upload Area Scanning Effect */
+.scan-line {
+    background: linear-gradient(to bottom, transparent, #00E5FF, transparent);
+    height: 2px;
+    width: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    box-shadow: 0 0 10px #00E5FF;
+    animation: scan 2s linear infinite;
+    display: none; 
+}
+.scanning .scan-line {
+    display: block;
+}
+
+.pixelated-image {
+    image-rendering: pixelated;
+}
+
+.conf-bar-initial {
+    width: 0%;
+}
+
+.iface-select {
+    background-color: #0B0F1E;
+    color: #fff;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    border: 1px solid #2A3447;
+}
+
+.live-flow-graph-wrap {
+    background: linear-gradient(135deg, rgba(3,10,25,0.6), rgba(8,14,30,0.85));
+    position: relative;
+    overflow: hidden;
+}
+
+.live-flow-toolbar {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 10;
+    display: flex;
+    gap: 6px;
+}
+
+.live-flow-tool-btn {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    border: 1px solid rgba(42,52,71,0.9);
+    background: rgba(11,15,30,0.88);
+    color: #E2E8F0;
+    box-shadow: 0 0 12px rgba(0,229,255,0.08);
+    transition: transform 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.live-flow-tool-btn:hover {
+    transform: translateY(-1px);
+    border-color: rgba(0,229,255,0.65);
+    color: #00E5FF;
+}
+
+.live-flow-tooltip {
+    position: absolute;
+    pointer-events: none;
+    z-index: 12;
+    max-width: 280px;
+    background: rgba(8, 14, 30, 0.95);
+    border: 1px solid rgba(0,229,255,0.22);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+    color: #E2E8F0;
+    border-radius: 12px;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.live-flow-tooltip.hidden {
+    display: none;
+}
+
+.live-flow-path {
+    fill: none;
+    stroke-dasharray: 10 14;
+    animation: liveFlowDash 8s linear infinite;
+}
+
+.live-flow-path.hit-area {
+    stroke: rgba(0,0,0,0);
+    stroke-dasharray: none;
+    animation: none;
+}
+
+.live-flow-path.hovered {
+    filter: url(#glow);
+    opacity: 1;
+}
+
+.live-flow-link.hovered .live-flow-path:not(.hit-area) {
+    filter: url(#glow);
+    opacity: 1;
+}
+
+.live-node-group.hovered .live-flow-node-core {
+    stroke: rgba(255,255,255,0.9);
+    stroke-width: 1.6;
+    filter: url(#glow);
+}
+
+.live-node-group.hovered text {
+    font-weight: 700;
+}
+
+.live-flow-path {
+    pointer-events: stroke;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.live-flow-node-core {
+    animation: liveNodePulse 2.8s ease-in-out infinite;
+}
+
+@keyframes liveFlowDash {
+    to { stroke-dashoffset: -240; }
+}
+
+@keyframes liveNodePulse {
+    0%, 100% { transform: scale(1); opacity: 0.9; }
+    50% { transform: scale(1.07); opacity: 1; }
+}
+
+@keyframes pageSlideFromLeft {
+    0% { transform: translateX(18px); opacity: 0.96; }
+    100% { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes pageSlideFromRight {
+    0% { transform: translateX(-18px); opacity: 0.96; }
+    100% { transform: translateX(0); opacity: 1; }
+}
+
+.page-slide-enter-left {
+    animation: pageSlideFromLeft 320ms ease;
+}
+
+.page-slide-enter-right {
+    animation: pageSlideFromRight 320ms ease;
+}

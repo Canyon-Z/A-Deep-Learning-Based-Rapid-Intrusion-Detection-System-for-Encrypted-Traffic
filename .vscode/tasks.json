@@ -4,7 +4,7 @@
 		{
 			"label": "Train Model",
 			"type": "shell",
-			"command": "python",
+			"command": "C:/Users/19512/AppData/Local/Programs/Python/Python311/python.exe",
 			"args": [
 				"run.py",
 				"--mode",

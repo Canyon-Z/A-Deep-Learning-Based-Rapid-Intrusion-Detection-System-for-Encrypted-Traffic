@@ -1,0 +1,163 @@
+{
+    "CNN_BiLSTM": {
+        "best_val_accuracy": "99.96%",
+        "best_val_loss": "0.0034",
+        "test_accuracy": "87.90%",
+        "test_loss": "1.5544",
+        "best_accuracy": "87.90%",
+        "final_loss": "1.5544",
+        "precision": "87.82",
+        "recall": "90.27",
+        "f1_score": "87.70",
+        "f2_score": "89.77",
+        "detection_rate": "90.27",
+        "fpr": "0.10",
+        "fnr": "19.35",
+        "auc": "0.9632",
+        "latency_ms_per_sample": "0.0216",
+        "throughput_samples_per_sec": "46304.09",
+        "epochs_trained": 50,
+        "classes": [
+            "Benign",
+            "Malware"
+        ]
+    },
+    "Classic_CNN": {
+        "best_val_accuracy": "99.97%",
+        "best_val_loss": "0.0065",
+        "test_accuracy": "87.92%",
+        "test_loss": "24.9402",
+        "best_accuracy": "87.92%",
+        "final_loss": "24.9402",
+        "precision": "87.84",
+        "recall": "90.30",
+        "f1_score": "87.72",
+        "f2_score": "89.79",
+        "detection_rate": "90.30",
+        "fpr": "0.08",
+        "fnr": "19.33",
+        "auc": "0.9266",
+        "latency_ms_per_sample": "0.0222",
+        "throughput_samples_per_sec": "45004.76",
+        "epochs_trained": 50,
+        "classes": [
+            "Benign",
+            "Malware"
+        ]
+    },
+    "Lightweight_CNN_BiLSTM": {
+        "best_val_accuracy": "99.95%",
+        "best_val_loss": "0.0019",
+        "test_accuracy": "87.90%",
+        "test_loss": "1.4383",
+        "best_accuracy": "87.90%",
+        "final_loss": "1.4383",
+        "precision": "87.82",
+        "recall": "90.28",
+        "f1_score": "87.71",
+        "f2_score": "89.78",
+        "detection_rate": "90.28",
+        "fpr": "0.11",
+        "fnr": "19.33",
+        "auc": "0.9569",
+        "latency_ms_per_sample": "0.0230",
+        "throughput_samples_per_sec": "43564.16",
+        "epochs_trained": 50,
+        "classes": [
+            "Benign",
+            "Malware"
+        ]
+    },
+    "Pure_BiLSTM": {
+        "best_val_accuracy": "99.95%",
+        "best_val_loss": "0.0024",
+        "test_accuracy": "87.77%",
+        "test_loss": "1.9032",
+        "best_accuracy": "87.77%",
+        "final_loss": "1.9032",
+        "precision": "87.72",
+        "recall": "90.17",
+        "f1_score": "87.58",
+        "f2_score": "89.67",
+        "detection_rate": "90.17",
+        "fpr": "0.12",
+        "fnr": "19.53",
+        "auc": "0.9939",
+        "latency_ms_per_sample": "0.0144",
+        "throughput_samples_per_sec": "69321.98",
+        "epochs_trained": 50,
+        "classes": [
+            "Benign",
+            "Malware"
+        ]
+    },
+    "Transformer": {
+        "best_val_accuracy": "99.92%",
+        "best_val_loss": "0.0049",
+        "test_accuracy": "87.70%",
+        "test_loss": "1.6683",
+        "best_accuracy": "87.70%",
+        "final_loss": "1.6683",
+        "precision": "87.59",
+        "recall": "90.03",
+        "f1_score": "87.49",
+        "f2_score": "89.53",
+        "detection_rate": "90.03",
+        "fpr": "0.51",
+        "fnr": "19.43",
+        "auc": "0.8685",
+        "latency_ms_per_sample": "0.0398",
+        "throughput_samples_per_sec": "25118.51",
+        "epochs_trained": 50,
+        "classes": [
+            "Benign",
+            "Malware"
+        ]
+    },
+    "MLP": {
+        "best_val_accuracy": "95.64%",
+        "best_val_loss": "0.2777",
+        "test_accuracy": "99.97%",
+        "test_loss": "0.0014",
+        "best_accuracy": "99.97%",
+        "final_loss": "0.0014",
+        "precision": "99.98",
+        "recall": "99.95",
+        "f1_score": "99.96",
+        "f2_score": "99.95",
+        "detection_rate": "99.95",
+        "fpr": "0.11",
+        "fnr": "0.00",
+        "auc": "1.0000",
+        "latency_ms_per_sample": "1.3992",
+        "throughput_samples_per_sec": "714.70",
+        "epochs_trained": 15,
+        "classes": [
+            "Benign",
+            "Malware"
+        ]
+    },
+    "CNN_BiLSTM_finetune": {
+        "best_val_accuracy": "99.94%",
+        "best_val_loss": "0.0032",
+        "test_accuracy": null,
+        "test_loss": null,
+        "best_accuracy": "99.94%",
+        "final_loss": "0.0032",
+        "precision": "99.94",
+        "recall": "99.94",
+        "f1_score": "99.94",
+        "f2_score": "99.94",
+        "detection_rate": "99.94",
+        "fpr": "0.11",
+        "fnr": "0.01",
+        "auc": "1.0000",
+        "latency_ms_per_sample": "0.0247",
+        "throughput_samples_per_sec": "40457.90",
+        "epochs_trained": 3,
+        "classes": [
+            "Benign",
+            "Malware"
+        ]
+    }
+}

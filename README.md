@@ -1,7 +1,7 @@
-# 基于深度学习的面向加密流量的入侵检测系统（Python 3.12）
+# 基于深度学习的面向加密流量的入侵检测系统（推荐 Python 3.11）
 
 ## 项目简介
-本项目旨在开发一套针对加密流量的智能入侵检测系统。当前主流程使用 CNN-BiLSTM 对流量进行二分类（Normal/Malicious），并可选接入本地大语言模型生成安全分析建议。
+本项目旨在开发一套针对加密流量的智能入侵检测系统。当前主流程使用 CNN-BiLSTM 对流量进行二分类（Normal/Malicious），并可选接入本地大语言模型生成安全分析建议。Transformer 已接入，但当前更适合作为实验模型，不建议作为默认主力检测器。
 
 ## 目录结构
 - `data/`: 存放数据集 (raw: 原始pcap, processed: 处理后的特征)
@@ -27,11 +27,13 @@
    pip install -r requirements.txt
    ```
    注意：Windows 用户可能需要安装 [Npcap](https://npcap.com/) 才能正常使用 Scapy。
+   如果你要启用 GPU，建议使用 Python 3.11 + CUDA 版 PyTorch。
 
 2. 训练模型（首次或特征升级后必须执行）：
    ```bash
-   python -m src.training.train --epochs 20 --batch-size 4 --lr 5e-4 --input-dim 6 --save-path checkpoints/cnn_bilstm_best.pth
+   C:/Users/19512/AppData/Local/Programs/Python/Python311/python.exe src/training/run_training_all.py --device auto
    ```
+   也可以分别运行 `src/training/train_cnn_bilstm.py`、`src/training/train_lightweight_cnn.py`、`src/training/train_transformer.py`，并显式传入 `--device auto|cpu|cuda`。
 
 3. 运行 Web 服务：
    ```bash
@@ -46,8 +48,15 @@
    打开 http://127.0.0.1:8000
 
 ## 模型文件位置
-- 默认检测模型权重路径：`checkpoints/cnn_bilstm_best.pth`
-- 可通过环境变量 `MODEL_CHECKPOINT_PATH` 覆盖默认路径。
+- 默认检测模型优先加载：`checkpoints/final_model.pth`
+- 兼容回退路径：`checkpoints/cnn_bilstm.pth`
+- Transformer 权重文件：`checkpoints/transformer.pth`
+- 当前后端会优先选择与模型结构完全匹配的权重文件。
+
+## 模型建议
+- 默认线上检测优先使用 CNN-BiLSTM 或 Lightweight_CNN_BiLSTM。
+- Transformer 当前在本数据集上的测试表现偏弱，建议先重训再考虑作为默认模型。
+- 如果训练后出现“偏向单一类别”的结果，优先检查 checkpoint 是否与当前模型结构一致。
 
 ## 本地 LLM 建议（可选）
 后端会在返回分类结果后异步生成建议，相关配置：

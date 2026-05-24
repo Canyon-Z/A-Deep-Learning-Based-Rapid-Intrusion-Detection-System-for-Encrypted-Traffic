@@ -21,6 +21,7 @@
 - [x] **模型细节完善 (`src/models/cnn_bilstm.py` & `transformer.py`)**
     - 确认输入 Tensor 的维度 (Batch, Channels, Height, Width) 是否与数据加载器输出一致。
     - 调整 CNN 的 Kernel Size 和 Transformer 的 Head 数量。
+    - 说明：Transformer 当前在测试集上的表现明显弱于 CNN_BiLSTM，若要作为默认模型需要先重训并重新校准阈值。
 - [x] **编写训练流程 (`src/training/train.py`)**
     - 补全 `train_model` 函数：
         - 定义 Loss 函数 (如 `CrossEntropyLoss`)。

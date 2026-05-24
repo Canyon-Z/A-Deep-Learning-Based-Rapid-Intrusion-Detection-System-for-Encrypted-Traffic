@@ -45,59 +45,7 @@
         }
     </script>
     
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap');
-        
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #0B0F1E;
-            color: #E2E8F0;
-            overflow-x: hidden;
-        }
-
-        .font-mono {
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        /* Custom Scrollbar */
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #0B0F1E; 
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #2A3447; 
-            border-radius: 4px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #00E5FF; 
-        }
-
-        /* Glassmorphism Card */
-        .glass-card {
-            background: rgba(21, 27, 45, 0.7);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(42, 52, 71, 0.5);
-        }
-        
-        /* Upload Area Scanning Effect */
-        .scan-line {
-            background: linear-gradient(to bottom, transparent, #00E5FF, transparent);
-            height: 2px;
-            width: 100%;
-            position: absolute;
-            top: 0;
-            left: 0;
-            box-shadow: 0 0 10px #00E5FF;
-            animation: scan 2s linear infinite;
-            display: none; 
-        }
-        .scanning .scan-line {
-            display: block;
-        }
-    </style>
+    <link rel="stylesheet" href="/static/css/styles.css">
 </head>
 <body class="bg-cyber-bg min-h-screen flex flex-col">
 
@@ -124,39 +72,31 @@
     <!-- Main Content -->
     <main class="flex-1 container mx-auto px-6 pt-24 pb-8 grid grid-cols-12 gap-6">
 
-        {% if model_status and not model_status.loaded %}
-        <div class="col-span-12">
-            <div class="bg-red-900/50 border border-red-500 text-red-200 px-6 py-4 rounded-xl relative shadow-neon-red flex items-start gap-4" role="alert">
-                <i class="fa-solid fa-triangle-exclamation text-2xl text-red-500 mt-1"></i>
-                <div class="flex-1">
-                    <strong class="font-bold text-lg">System Error: Model Not Loaded</strong>
-                    <p class="mt-1">Back-end AI model failed to initialize. Prediction services are unavailable.</p>
-                    {% if model_status.error %}
-                    <div class="mt-3 p-3 bg-black/30 rounded border border-red-500/30 font-mono text-xs text-red-300 overflow-x-auto">
-                        {{ model_status.error }}
-                    </div>
-                    {% endif %}
-                    <p class="mt-3 text-sm text-gray-400">Please check if 'checkpoints/final_model.pth' exists and is compatible.</p>
-                </div>
+        <!-- View Toggle (Top Center) -->
+        <div class="col-span-12 flex justify-center">
+            <div class="inline-flex items-center p-1 rounded-full bg-cyber-card/80 border border-cyber-border backdrop-blur-sm shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]">
+                <button id="tabUpload" class="px-4 py-1.5 rounded-full text-sm text-gray-300 transition-all duration-200 ease-out">上传检测</button>
+                <button id="tabLive" class="px-4 py-1.5 rounded-full text-sm text-gray-300 transition-all duration-200 ease-out">实时抓包</button>
             </div>
         </div>
-        {% endif %}
+
+        <!-- MODEL_STATUS_PLACEHOLDER -->
         
         <!-- Left Column: Upload & Stats (4 cols) -->
-        <div class="col-span-12 lg:col-span-4 flex flex-col gap-6">
+        <div class="col-span-12 lg:col-span-3 flex flex-col gap-6">
             
             <!-- Upload Area -->
             <div id="dropZone" class="glass-card rounded-xl p-6 relative overflow-hidden group transition-all duration-300 hover:border-cyber-primary/50 hover:shadow-neon cursor-pointer">
                 <div class="scan-line"></div>
-                <input type="file" id="fileInput" class="hidden" accept=".pcap,.pcapng">
+                <input type="file" id="fileInput" class="hidden" accept=".pcap,.pcapng" multiple aria-label="上传 PCAP 文件" title="上传 PCAP 文件">
                 
                 <div class="flex flex-col items-center justify-center py-8 text-center" id="uploadContent">
                     <div class="w-16 h-16 rounded-full bg-cyber-card border border-dashed border-cyber-border flex items-center justify-center text-3xl text-gray-500 mb-4 group-hover:text-cyber-primary group-hover:border-cyber-primary transition-colors">
                         <i class="fa-solid fa-cloud-upload-alt"></i>
                     </div>
                     <h3 class="text-lg font-semibold text-white mb-2">上传加密流量 (PCAP)</h3>
-                    <p class="text-sm text-gray-400 mb-4">拖拽文件至此或点击上传</p>
-                    <button class="px-6 py-2 bg-cyber-primary/10 text-cyber-primary border border-cyber-primary/30 rounded hover:bg-cyber-primary hover:text-black transition-all text-sm font-medium">选择文件</button>
+                    <p class="text-sm text-gray-400 mb-4">拖拽文件至此或点击上传，支持多选批量检测</p>
+                    <button id="chooseFileBtn" type="button" class="px-6 py-2 bg-cyber-primary/10 text-cyber-primary border border-cyber-primary/30 rounded hover:bg-cyber-primary hover:text-black transition-all text-sm font-medium">选择文件</button>
                     <p class="text-xs text-gray-500 mt-4 font-mono">支持: .pcap, .pcapng (Max 500MB)</p>
                 </div>
 
@@ -165,6 +105,47 @@
                     <div class="w-12 h-12 border-2 border-cyber-primary border-t-transparent rounded-full animate-spin mb-4"></div>
                     <p class="text-cyber-primary font-mono text-sm animate-pulse">正在分析流量特征...</p>
                     <p class="text-gray-500 text-xs mt-2" id="processStatus">提取 Session 中...</p>
+                </div>
+            </div>
+
+            <!-- Live Capture Area (hidden by default) -->
+            <div id="liveSection" class="glass-card rounded-xl p-6 relative overflow-hidden transition-all duration-300 hidden">
+                <h3 class="text-lg font-semibold text-white mb-3">实时抓包检测</h3>
+                <div class="flex gap-2 items-center mb-3">
+                    <!-- 自定义网卡选择下拉框 -->
+                    <div class="relative flex-none w-[242px] min-w-0" id="customSelectWrapper">
+                        <div id="selectedDisplay" 
+                             class="w-full rounded px-3 py-2 text-sm text-white bg-cyber-card/10 border border-cyber-border cursor-pointer flex justify-between items-center transition-all hover:border-cyber-primary">
+                            <span id="selectedText" class="truncate">选择网卡</span>
+                            <svg id="dropdownArrow" class="w-4 h-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                        </div>
+                        <ul id="dropdownMenu" 
+                            class="absolute left-0 right-0 mt-1 rounded-lg bg-cyber-card/95 border border-cyber-border shadow-lg z-50 hidden max-h-60 overflow-y-auto text-sm">
+                            <!-- options populated by JS -->
+                        </ul>
+                    </div>
+                    <button id="refreshIfaces" class="px-3 py-2 bg-cyber-primary/10 text-cyber-primary border border-cyber-primary/30 rounded text-sm">刷新</button>
+                </div>
+                <div class="flex gap-2 mb-3">
+                    <button id="startLiveBtn" class="px-4 py-2 bg-cyber-primary text-black rounded">开始</button>
+                    <button id="stopLiveBtn" class="hidden px-4 py-2 bg-gray-700 text-white rounded">停止</button>
+                </div>
+                <div class="text-sm text-gray-400 mb-2">状态: <span id="liveStatus">停止</span></div>
+                <div id="liveError" class="hidden mb-2 text-xs text-red-300 bg-red-900/30 border border-red-500/30 rounded px-3 py-2"></div>
+                <div id="liveFlowGraphWrap" class="live-flow-graph-wrap h-[31rem] rounded-lg border border-cyber-border mb-3">
+                    <div class="live-flow-toolbar">
+                        <button id="clearLiveLogsBtn" type="button" class="live-flow-tool-btn" title="清除日志"><i class="fa-solid fa-trash"></i></button>
+                        <button id="liveFlowZoomOut" type="button" class="live-flow-tool-btn" title="缩小"><i class="fa-solid fa-minus"></i></button>
+                        <button id="liveFlowZoomReset" type="button" class="live-flow-tool-btn" title="重置"><i class="fa-solid fa-rotate-left"></i></button>
+                        <button id="liveFlowZoomIn" type="button" class="live-flow-tool-btn" title="放大"><i class="fa-solid fa-plus"></i></button>
+                    </div>
+                    <div id="liveFlowTooltip" class="live-flow-tooltip hidden"></div>
+                    <div id="liveFlowGraph" class="w-full h-full"></div>
+                </div>
+                <div class="h-16 overflow-auto bg-black/20 rounded p-1" id="liveFlowList">
+                    <p class="text-sm text-gray-400">暂无实时流量</p>
                 </div>
             </div>
 
@@ -179,16 +160,73 @@
                     <h4 class="text-2xl font-bold font-mono text-cyber-danger" id="statMalware">0</h4>
                 </div>
                 <div class="glass-card p-4 rounded-xl border-l-4 border-cyber-success col-span-2">
-                    <div class="flex justify-between items-center">
+                    <div class="flex justify-between items-center mb-2">
                         <div>
-                            <p class="text-gray-400 text-xs mb-1">模型准确率 (Validation)</p>
-                            <h4 class="text-2xl font-bold font-mono text-white">96.8<span class="text-sm text-gray-500">%</span></h4>
+                            <p class="text-gray-400 text-xs mb-1">当前投票模式</p>
+                            <p class="text-xs text-gray-500">ACC: <span id="statActiveAcc" class="font-mono text-white">--</span></p>
                         </div>
                         <div class="text-right">
-                            <p class="text-gray-400 text-xs mb-1">运行状态</p>
-                            <span class="px-2 py-1 rounded bg-cyber-success/10 text-cyber-success text-xs border border-cyber-success/20">CNN-BiLSTM Active</span>
+                            <span id="activeModelBadge" class="px-2 py-1 rounded bg-cyber-success/10 text-cyber-success text-xs border border-cyber-success/20">投票模式</span>
                         </div>
                     </div>
+                    <div class="mb-3 flex items-center justify-between rounded-lg border border-cyber-primary/30 bg-cyber-primary/10 px-3 py-2">
+                        <span class="text-xs text-gray-300">当前推理模式</span>
+                        <label class="flex items-center gap-2 text-xs font-bold text-cyber-primary cursor-pointer select-none">
+                            <input id="votingModeToggle" type="checkbox" class="h-4 w-4 accent-cyber-primary" checked>
+                            <span id="votingModeLabelText">6 模型投票已启用</span>
+                        </label>
+                    </div>
+                    <div id="modelSelectorBox">
+                        <select id="modelSelector" title="选择检测模型" aria-label="选择检测模型" class="w-full bg-cyber-bg border border-cyber-border rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-cyber-primary appearance-none">
+                            <option value="cnn_bilstm" selected>CNN-BiLSTM (默认主力)</option>
+                            <option value="classic_cnn">Classic CNN (经典卷积池化)</option>
+                            <option value="lightweight_cnn">Lightweight CNN-BiLSTM (轻量化)</option>
+                            <option value="pure_bilstm">Pure BiLSTM (纯双向长短期记忆)</option>
+                            <option value="mlp">MLP (多层感知机基线)</option>
+                            <option value="transformer">Transformer (自注意力机制)</option>
+                        </select>
+                    </div>
+                    <script>
+                        (async function(){
+                            try{
+                                const r = await fetch('/static/checkpoints/model_metrics.json');
+                                if (!r.ok) return;
+                                const body = await r.json();
+                                const map = { 'CNN_BiLSTM':'m1', 'Classic_CNN':'m2', 'Lightweight_CNN_BiLSTM':'m3', 'Pure_BiLSTM':'m4', 'MLP':'m5', 'Transformer':'m6' };
+                                function setText(id, value) {
+                                    const el = document.getElementById(id);
+                                    if (!el) return;
+                                    if (value === null || value === undefined || value === '') return;
+                                    el.innerText = String(value);
+                                }
+                                function fmtPercent(value) {
+                                    if (value === null || value === undefined || value === '') return '--';
+                                    return String(value).includes('%') ? String(value) : String(value) + '%';
+                                }
+                                Object.keys(map).forEach(k=>{
+                                    const node = body[k];
+                                    if (!node) return;
+                                    const prefix = map[k];
+                                    setText(prefix + '-acc', node.test_accuracy || node.best_val_accuracy || node.best_accuracy);
+                                    setText(prefix + '-pre', node.precision);
+                                    setText(prefix + '-rec', node.recall);
+                                    setText(prefix + '-f1', node.f1_score);
+                                    setText(prefix + '-f2', node.f2_score);
+                                    setText(prefix + '-dr', node.detection_rate);
+                                    setText(prefix + '-fpr', fmtPercent(node.fpr));
+                                    setText(prefix + '-fnr', fmtPercent(node.fnr));
+                                    setText(prefix + '-lat', node.latency_ms_per_sample ? `${node.latency_ms_per_sample} ms/条` : '--');
+                                    if (node.parameters || node.parameter_count) {
+                                        setText(prefix + '-par', node.parameters || node.parameter_count);
+                                    }
+                                    setText(prefix + '-tps', node.throughput_samples_per_sec ? `${node.throughput_samples_per_sec} 条/s` : '--');
+                                    setText(prefix + '-auc', node.auc);
+                                });
+                                // update statActiveAcc if selector present
+                                try{ const sel = document.getElementById('modelSelector'); if (sel) { const selected = sel.value; const prefix = {cnn_bilstm:'m1',classic_cnn:'m2',lightweight_cnn:'m3',pure_bilstm:'m4',mlp:'m5',transformer:'m6'}[selected]; const accEl = document.getElementById(prefix+'-acc'); if (accEl) { const stat = document.getElementById('statActiveAcc'); if (stat) stat.innerHTML = accEl.innerText.replace('%','') + '<span class="text-sm text-gray-500">%</span>'; } } }catch(e){}
+                            }catch(e){ console.warn('metrics loader failed', e); }
+                        })();
+                    </script>
                 </div>
             </div>
 
@@ -202,10 +240,10 @@
         </div>
 
         <!-- Right Column: Charts & Logs (8 cols) -->
-        <div class="col-span-12 lg:col-span-8 flex flex-col gap-6">
+        <div id="rightColumn" class="col-span-12 lg:col-span-9 flex flex-col gap-6">
             
             <!-- Real-time Trend Chart -->
-            <div class="glass-card rounded-xl p-6 h-[400px] flex flex-col">
+            <div id="trendChartPanel" class="glass-card rounded-xl p-6 h-[400px] flex flex-col">
                 <div class="flex justify-between items-center mb-4">
                     <h3 class="text-lg font-semibold text-white flex items-center gap-2">
                         <i class="fa-solid fa-wave-square text-cyber-primary"></i> 实时流量监测趋势
@@ -218,32 +256,44 @@
                 <div id="lineChart" class="flex-1 w-full"></div>
             </div>
 
+            <div id="liveGraphSwapSlot" class="hidden"></div>
+
             <!-- Recent Detections List -->
-            <div class="glass-card rounded-xl flex-1 flex flex-col min-h-[300px] overflow-hidden">
-                <div class="px-6 py-4 border-b border-cyber-border bg-cyber-card/50 flex justify-between items-center">
-                    <h3 class="text-lg font-semibold text-white flex items-center gap-2">
-                        <i class="fa-solid fa-list-ul text-cyber-primary"></i> 最近检测记录
+            <div id="resultCardPanel" class="glass-card rounded-xl overflow-hidden min-h-[600px]">
+                <div class="px-4 py-3 border-b border-cyber-border bg-cyber-card/50 flex justify-between items-center">
+                    <h3 id="resultTableTitle" class="text-lg font-semibold text-white flex items-center gap-2">
+                        <i class="fa-solid fa-list-ul text-cyber-primary"></i> 实时抓包记录
                     </h3>
-                    <button class="text-xs text-gray-400 hover:text-white transition-colors"><i class="fa-solid fa-rotate-right"></i> 刷新</button>
+                    <span id="resultTableHint" class="hidden lg:inline text-xs text-gray-500 ml-2">仅记录当前实时抓包会话</span>
+                    <div class="flex items-center gap-2">
+                        <div class="flex items-center gap-1 rounded-full bg-black/20 border border-cyber-border p-1">
+                            <button id="recordFilterAll" type="button" class="record-filter-btn px-3 py-1 rounded-full text-xs bg-cyber-primary text-black">全部</button>
+                            <button id="recordFilterBenign" type="button" class="record-filter-btn px-3 py-1 rounded-full text-xs text-gray-300 hover:text-white">Benign</button>
+                            <button id="recordFilterMalware" type="button" class="record-filter-btn px-3 py-1 rounded-full text-xs text-gray-300 hover:text-white">Malware</button>
+                        </div>
+                        <button id="clearUploadLogsBtn" type="button" class="text-xs text-gray-400 hover:text-white transition-colors"><i class="fa-solid fa-trash"></i> 清除日志</button>
+                        <button id="refreshBtn" type="button" class="text-xs text-gray-400 hover:text-white transition-colors"><i class="fa-solid fa-rotate-right"></i> 刷新</button>
+                    </div>
                 </div>
                 
-                <div class="overflow-x-auto flex-1">
+                <div id="resultTableViewport" class="overflow-auto max-h-[700px]">
                     <table class="w-full text-left border-collapse">
                         <thead>
-                            <tr class="text-xs text-gray-500 bg-cyber-card border-b border-cyber-border">
-                                <th class="px-6 py-3 font-medium">文件名</th>
-                                <th class="px-6 py-3 font-medium">检测时间</th>
-                                <th class="px-6 py-3 font-medium">耗时</th>
-                                <th class="px-6 py-3 font-medium">大小</th>
-                                <th class="px-6 py-3 font-medium">结果</th>
-                                <th class="px-6 py-3 font-medium">置信度</th>
-                                <th class="px-6 py-3 font-medium">操作</th>
+                            <tr class="text-xs text-gray-500 bg-cyber-card border-b border-cyber-border sticky top-0 z-10">
+                                <th class="px-4 py-2.5 font-medium">文件名</th>
+                                <th class="px-4 py-2.5 font-medium">检测时间</th>
+                                <th class="px-4 py-2.5 font-medium">耗时</th>
+                                <th class="px-4 py-2.5 font-medium">大小</th>
+                                <th class="px-4 py-2.5 font-medium">结果</th>
+                                <th class="px-4 py-2.5 font-medium">模型</th>
+                                <th class="px-4 py-2.5 font-medium">置信度</th>
+                                <th class="px-4 py-2.5 font-medium">操作</th>
                             </tr>
                         </thead>
                         <tbody id="resultTableBody" class="text-sm text-gray-300">
                             <!-- JS will populate rows here -->
                             <tr class="border-b border-cyber-border/50 hover:bg-cyber-card/30 transition-colors">
-                                <td class="px-6 py-4 font-mono text-gray-500 text-center" colspan="7">暂无检测记录，请上传文件开始检测</td>
+                                <td class="px-6 py-4 font-mono text-gray-500 text-center" colspan="8">暂无检测记录，请上传文件开始检测</td>
                             </tr>
                         </tbody>
                     </table>
@@ -251,369 +301,416 @@
             </div>
 
         </div>
+
+        <!-- ====== 新增：多维度模型评估考核系统 (补充的所有评价指标区域) ====== -->
+        <div class="col-span-12 flex flex-col gap-6 mt-4 border-t border-cyber-border pt-8" id="model-metrics-section">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded bg-cyber-primary/20 flex items-center justify-center text-cyber-primary shadow-neon">
+                    <i class="fa-solid fa-layer-group"></i>
+                </div>
+                <div>
+                    <h2 class="text-xl font-bold text-white tracking-wide">多维度模型效能评估中心</h2>
+                    <p class="text-xs text-gray-400 mt-0.5">Multi-Model Performance & Security Metrics Matrix</p>
+                </div>
+            </div>
+
+            <!-- 三栏模型评估面板 -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                <!-- 1. CNN-BiLSTM (主力模型) -->
+                <div id="modelCard-cnn_bilstm" onclick="selectModel('cnn_bilstm', 'CNN-BiLSTM')" class="glass-card rounded-xl border-2 border-cyber-success relative overflow-hidden flex flex-col cursor-pointer shadow-[0_0_15px_rgba(0,208,132,0.3)] transition-all duration-300 transform scale-105 z-10 opacity-100">
+                    <div class="absolute top-0 left-0 w-full h-1 bg-cyber-success opacity-80"></div>
+                    <div class="p-4 border-b border-cyber-border bg-black/20 flex justify-between items-center">
+                        <div>
+                            <h3 class="font-bold text-white text-lg flex items-center gap-2">CNN-BiLSTM <span id="tag-cnn_bilstm" class="px-2 py-0.5 rounded bg-cyber-success/10 text-cyber-success text-[10px] border border-cyber-success/20 font-bold">Active 当前使用</span></h3>
+                            <p class="text-xs text-gray-400 mt-1">混合架构：空间局部特征 + 最优时序依赖</p>
+                        </div>
+                    </div>
+                    <div class="p-4 flex flex-col gap-5 flex-1">
+                        <!-- 核心基础指标 -->
+                        <div class="grid grid-cols-3 gap-3">
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50">
+                                <p class="text-[10px] text-gray-400 mb-1">ACC (准确率)</p>
+                                <p class="text-lg font-mono font-bold text-white" id="m1-acc">--</p>
+                            </div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50">
+                                <p class="text-[10px] text-gray-400 mb-1">Precision(精确率)</p>
+                                <p class="text-lg font-mono font-bold text-cyber-primary" id="m1-pre">--</p>
+                            </div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50">
+                                <p class="text-[10px] text-gray-400 mb-1">Recall (召回率)</p>
+                                <p class="text-lg font-mono font-bold text-cyber-success" id="m1-rec">--</p>
+                            </div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50">
+                                <p class="text-[10px] text-gray-400 mb-1">F1-Score</p>
+                                <p class="text-lg font-mono font-bold text-white" id="m1-f1">--</p>
+                            </div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50">
+                                <p class="text-[10px] text-gray-400 mb-1">F2-Score</p>
+                                <p class="text-lg font-mono font-bold text-white" id="m1-f2">--</p>
+                            </div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50">
+                                <p class="text-[10px] text-gray-400 mb-1">DR (检测率)</p>
+                                <p class="text-lg font-mono font-bold text-cyber-warning" id="m1-dr">--</p>
+                            </div>
+                        </div>
+                        <!-- 安全场景与性能指标 -->
+                        <div class="flex flex-col gap-2">
+                            <div class="flex justify-between items-center text-[11px] bg-black/20 px-3 py-2 rounded border border-cyber-border">
+                                <span class="text-gray-400">误报率 (FPR): <span class="text-cyber-danger font-mono font-bold ml-1" id="m1-fpr">2.15%</span></span>
+                                <span class="text-gray-400">漏报率 (FNR): <span class="text-cyber-danger font-mono font-bold ml-1" id="m1-fnr">2.90%</span></span>
+                            </div>
+                            <div class="flex justify-between items-center text-[11px] bg-black/20 px-3 py-2 rounded border border-cyber-border">
+                                <span class="text-gray-400">延迟: <span class="text-white font-mono ml-1" id="m1-lat">12.4 ms/条</span></span>
+                                <span class="text-gray-400">参数: <span class="text-white font-mono ml-1" id="m1-par">2.1 M</span></span>
+                                <span class="text-gray-400">吞吐: <span class="text-white font-mono ml-1" id="m1-tps">450 条/s</span></span>
+                            </div>
+                        </div>
+                        <!-- 可是化图表区 -->
+                        <div class="grid grid-cols-2 gap-4 mt-auto pt-4 border-t border-cyber-border/50">
+                            <div class="flex flex-col items-center">
+                                <span class="text-[10px] text-gray-400 mb-1">混淆矩阵 (Confusion Matrix)</span>
+                                <div id="chart-cm-m1" class="h-28 w-full"></div>
+                            </div>
+                            <div class="flex flex-col items-center">
+                                <span class="text-[10px] text-gray-400 mb-1">ROC 曲线 (AUC: <span id="m1-auc" class="text-cyber-primary font-bold">0.98</span>)</span>
+                                <div id="chart-roc-m1" class="h-28 w-full"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. Classic-CNN -->
+                <div id="modelCard-classic_cnn" onclick="selectModel('classic_cnn', 'Classic-CNN')" class="glass-card rounded-xl border border-cyber-border relative overflow-hidden flex flex-col cursor-pointer hover:shadow-[0_0_15px_rgba(0,229,255,0.15)] transition-all duration-300 opacity-80 hover:opacity-100">
+                    <div class="absolute top-0 left-0 w-full h-1 bg-cyber-border opacity-80"></div>
+                    <div class="p-4 border-b border-cyber-border bg-black/20 flex justify-between items-center">
+                        <div>
+                            <h3 class="font-bold text-white text-lg flex items-center gap-2">Classic-CNN <span id="tag-classic_cnn" class="px-2 py-0.5 rounded bg-gray-500/10 text-gray-400 text-[10px] border border-gray-500/20">Standby 待命中</span></h3>
+                            <p class="text-xs text-gray-400 mt-1">基础架构：纯卷积空间特征提取</p>
+                        </div>
+                    </div>
+                    <div class="p-4 flex flex-col gap-5 flex-1">
+                        <div class="grid grid-cols-3 gap-3">
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">ACC (准确率)</p><p class="text-lg font-mono font-bold text-white" id="m2-acc">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">Precision</p><p class="text-lg font-mono font-bold text-cyber-primary" id="m2-pre">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">Recall</p><p class="text-lg font-mono font-bold text-cyber-success" id="m2-rec">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">F1-Score</p><p class="text-lg font-mono font-bold text-white" id="m2-f1">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">F2-Score</p><p class="text-lg font-mono font-bold text-white" id="m2-f2">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">DR (检测率)</p><p class="text-lg font-mono font-bold text-cyber-warning" id="m2-dr">--</p></div>
+                        </div>
+                        <div class="flex flex-col gap-2">
+                            <div class="flex justify-between items-center text-[11px] bg-black/20 px-3 py-2 rounded border border-cyber-border">
+                                <span class="text-gray-400">误报率 (FPR): <span class="text-cyber-warning font-mono font-bold ml-1" id="m2-fpr">4.85%</span></span>
+                                <span class="text-gray-400">漏报率 (FNR): <span class="text-cyber-warning font-mono font-bold ml-1" id="m2-fnr">8.20%</span></span>
+                            </div>
+                            <div class="flex justify-between items-center text-[11px] bg-black/20 px-3 py-2 rounded border border-cyber-border">
+                                <span class="text-gray-400">延迟: <span class="text-white font-mono ml-1" id="m2-lat">8.2 ms/条</span></span>
+                                <span class="text-gray-400">参数: <span class="text-white font-mono ml-1" id="m2-par">1.5 M</span></span>
+                                <span class="text-gray-400">吞吐: <span class="text-white font-mono ml-1" id="m2-tps">720 条/s</span></span>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mt-auto pt-4 border-t border-cyber-border/50">
+                            <div class="flex flex-col items-center">
+                                <span class="text-[10px] text-gray-400 mb-1">混淆矩阵 (Confusion Matrix)</span>
+                                <div id="chart-cm-m2" class="h-28 w-full"></div>
+                            </div>
+                            <div class="flex flex-col items-center">
+                                <span class="text-[10px] text-gray-400 mb-1">ROC 曲线 (AUC: <span id="m2-auc" class="text-cyber-primary font-bold">0.93</span>)</span>
+                                <div id="chart-roc-m2" class="h-28 w-full"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. Lightweight CNN-BiLSTM -->
+                <div id="modelCard-lightweight_cnn" onclick="selectModel('lightweight_cnn', 'Lightweight CNN-BiLSTM')" class="glass-card rounded-xl border border-cyber-border relative overflow-hidden flex flex-col cursor-pointer hover:shadow-[0_0_15px_rgba(255,204,0,0.15)] transition-all duration-300 opacity-80 hover:opacity-100">
+                    <div class="absolute top-0 left-0 w-full h-1 bg-cyber-warning opacity-80"></div>
+                    <div class="p-4 border-b border-cyber-border bg-black/20 flex justify-between items-center">
+                        <div>
+                            <h3 class="font-bold text-white text-lg flex items-center gap-2">轻量化 CNN-BiLSTM <span id="tag-lightweight_cnn" class="px-2 py-0.5 rounded bg-gray-500/10 text-gray-400 text-[10px] border border-gray-500/20">Standby 待命中</span></h3>
+                            <p class="text-xs text-gray-400 mt-1">压缩架构：通道剪枝 + 低维时序</p>
+                        </div>
+                    </div>
+                    <div class="p-4 flex flex-col gap-5 flex-1">
+                        <div class="grid grid-cols-3 gap-3">
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">ACC (准确率)</p><p class="text-lg font-mono font-bold text-white" id="m3-acc">94.50%</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">Precision</p><p class="text-lg font-mono font-bold text-cyber-primary" id="m3-pre">93.20%</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">Recall</p><p class="text-lg font-mono font-bold text-cyber-success" id="m3-rec">95.00%</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">F1-Score</p><p class="text-lg font-mono font-bold text-white" id="m3-f1">94.09%</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">F2-Score</p><p class="text-lg font-mono font-bold text-white" id="m3-f2">94.25%</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">DR (检测率)</p><p class="text-lg font-mono font-bold text-cyber-warning" id="m3-dr">95.00%</p></div>
+                        </div>
+                        <div class="flex flex-col gap-2">
+                            <div class="flex justify-between items-center text-[11px] bg-black/20 px-3 py-2 rounded border border-cyber-border">
+                                <span class="text-gray-400">误报率 (FPR): <span class="text-cyber-warning font-mono font-bold ml-1" id="m3-fpr">3.60%</span></span>
+                                <span class="text-gray-400">漏报率 (FNR): <span class="text-cyber-warning font-mono font-bold ml-1" id="m3-fnr">5.00%</span></span>
+                            </div>
+                            <div class="flex justify-between items-center text-[11px] bg-black/20 px-3 py-2 rounded border border-cyber-border">
+                                <span class="text-gray-400">延迟: <span class="text-cyber-success font-mono font-bold ml-1" id="m3-lat">4.5 ms/条</span></span>
+                                <span class="text-gray-400">参数: <span class="text-cyber-success font-mono font-bold ml-1" id="m3-par">0.6 M</span></span>
+                                <span class="text-gray-400">吞吐: <span class="text-cyber-success font-mono font-bold ml-1" id="m3-tps">1250 条/s</span></span>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mt-auto pt-4 border-t border-cyber-border/50">
+                            <div class="flex flex-col items-center">
+                                <span class="text-[10px] text-gray-400 mb-1">混淆矩阵 (Confusion Matrix)</span>
+                                <div id="chart-cm-m3" class="h-28 w-full"></div>
+                            </div>
+                            <div class="flex flex-col items-center">
+                                <span class="text-[10px] text-gray-400 mb-1">ROC 曲线 (AUC: <span id="m3-auc" class="text-cyber-primary font-bold">0.96</span>)</span>
+                                <div id="chart-roc-m3" class="h-28 w-full"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. Pure BiLSTM -->
+                <div id="modelCard-pure_bilstm" onclick="selectModel('pure_bilstm', 'Pure BiLSTM')" class="glass-card rounded-xl border border-cyber-border relative overflow-hidden flex flex-col cursor-pointer hover:shadow-[0_0_15px_rgba(155,89,182,0.15)] transition-all duration-300 opacity-80 hover:opacity-100">
+                    <div class="absolute top-0 left-0 w-full h-1 bg-purple-500 opacity-80"></div>
+                    <div class="p-4 border-b border-cyber-border bg-black/20 flex justify-between items-center">
+                        <div>
+                            <h3 class="font-bold text-white text-lg flex items-center gap-2">Pure BiLSTM <span id="tag-pure_bilstm" class="px-2 py-0.5 rounded bg-gray-500/10 text-gray-400 text-[10px] border border-gray-500/20">Standby 待命中</span></h3>
+                            <p class="text-xs text-gray-400 mt-1">时序特征：双向长短期记忆网络</p>
+                        </div>
+                    </div>
+                    <div class="p-4 flex flex-col gap-5 flex-1">
+                        <div class="grid grid-cols-3 gap-3">
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">ACC (准确率)</p><p class="text-lg font-mono font-bold text-white" id="m4-acc">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">Precision</p><p class="text-lg font-mono font-bold text-cyber-primary" id="m4-pre">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">Recall</p><p class="text-lg font-mono font-bold text-cyber-success" id="m4-rec">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">F1-Score</p><p class="text-lg font-mono font-bold text-white" id="m4-f1">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">F2-Score</p><p class="text-lg font-mono font-bold text-white" id="m4-f2">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">DR (检测率)</p><p class="text-lg font-mono font-bold text-cyber-warning" id="m4-dr">--</p></div>
+                        </div>
+                        <div class="flex flex-col gap-2">
+                            <div class="flex justify-between items-center text-[11px] bg-black/20 px-3 py-2 rounded border border-cyber-border">
+                                <span class="text-gray-400">误报率 (FPR): <span class="text-cyber-warning font-mono font-bold ml-1" id="m4-fpr">--</span></span>
+                                <span class="text-gray-400">漏报率 (FNR): <span class="text-cyber-warning font-mono font-bold ml-1" id="m4-fnr">--</span></span>
+                            </div>
+                            <div class="flex justify-between items-center text-[11px] bg-black/20 px-3 py-2 rounded border border-cyber-border">
+                                <span class="text-gray-400">延迟: <span class="text-cyber-success font-mono font-bold ml-1" id="m4-lat">-- ms/条</span></span>
+                                <span class="text-gray-400">参数: <span class="text-cyber-success font-mono font-bold ml-1" id="m4-par">-- M</span></span>
+                                <span class="text-gray-400">吞吐: <span class="text-cyber-success font-mono font-bold ml-1" id="m4-tps">-- 条/s</span></span>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mt-auto pt-4 border-t border-cyber-border/50">
+                            <div class="flex flex-col items-center">
+                                <span class="text-[10px] text-gray-400 mb-1">混淆矩阵 (Confusion Matrix)</span>
+                                <div id="chart-cm-m4" class="h-28 w-full"></div>
+                            </div>
+                            <div class="flex flex-col items-center">
+                                <span class="text-[10px] text-gray-400 mb-1">ROC 曲线 (AUC: <span id="m4-auc" class="text-cyber-primary font-bold">--</span>)</span>
+                                <div id="chart-roc-m4" class="h-28 w-full"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 5. Transformer -->
+                <div id="modelCard-transformer" onclick="selectModel('transformer', 'Transformer')" class="glass-card rounded-xl border border-cyber-border relative overflow-hidden flex flex-col cursor-pointer hover:shadow-[0_0_15px_rgba(231,76,60,0.15)] transition-all duration-300 opacity-80 hover:opacity-100">
+                    <div class="absolute top-0 left-0 w-full h-1 bg-red-500 opacity-80"></div>
+                    <div class="p-4 border-b border-cyber-border bg-black/20 flex justify-between items-center">
+                        <div>
+                            <h3 class="font-bold text-white text-lg flex items-center gap-2">Transformer <span id="tag-transformer" class="px-2 py-0.5 rounded bg-gray-500/10 text-gray-400 text-[10px] border border-gray-500/20">Standby 待命中</span></h3>
+                            <p class="text-xs text-gray-400 mt-1">全局特征：自注意力机制序列建模</p>
+                        </div>
+                    </div>
+                    <div class="p-4 flex flex-col gap-5 flex-1">
+                        <div class="grid grid-cols-3 gap-3">
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">ACC (准确率)</p><p class="text-lg font-mono font-bold text-white" id="m6-acc">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">Precision</p><p class="text-lg font-mono font-bold text-cyber-primary" id="m6-pre">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">Recall</p><p class="text-lg font-mono font-bold text-cyber-success" id="m6-rec">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">F1-Score</p><p class="text-lg font-mono font-bold text-white" id="m6-f1">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">F2-Score</p><p class="text-lg font-mono font-bold text-white" id="m6-f2">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">DR (检测率)</p><p class="text-lg font-mono font-bold text-cyber-warning" id="m6-dr">--</p></div>
+                        </div>
+                        <div class="flex flex-col gap-2">
+                            <div class="flex justify-between items-center text-[11px] bg-black/20 px-3 py-2 rounded border border-cyber-border">
+                                <span class="text-gray-400">误报率 (FPR): <span class="text-cyber-warning font-mono font-bold ml-1" id="m6-fpr">--</span></span>
+                                <span class="text-gray-400">漏报率 (FNR): <span class="text-cyber-warning font-mono font-bold ml-1" id="m6-fnr">--</span></span>
+                            </div>
+                            <div class="flex justify-between items-center text-[11px] bg-black/20 px-3 py-2 rounded border border-cyber-border">
+                                <span class="text-gray-400">延迟: <span class="text-cyber-success font-mono font-bold ml-1" id="m6-lat">-- ms/条</span></span>
+                                <span class="text-gray-400">参数: <span class="text-cyber-success font-mono font-bold ml-1" id="m6-par">-- M</span></span>
+                                <span class="text-gray-400">吞吐: <span class="text-cyber-success font-mono font-bold ml-1" id="m6-tps">-- 条/s</span></span>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mt-auto pt-4 border-t border-cyber-border/50">
+                            <div class="flex flex-col items-center">
+                                <span class="text-[10px] text-gray-400 mb-1">混淆矩阵 (Confusion Matrix)</span>
+                                <div id="chart-cm-m6" class="h-28 w-full"></div>
+                            </div>
+                            <div class="flex flex-col items-center">
+                                <span class="text-[10px] text-gray-400 mb-1">ROC 曲线 (AUC: <span id="m6-auc" class="text-cyber-primary font-bold">--</span>)</span>
+                                <div id="chart-roc-m6" class="h-28 w-full"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 6. MLP -->
+                <div id="modelCard-mlp" onclick="selectModel('mlp', 'MLP')" class="glass-card rounded-xl border border-cyber-border relative overflow-hidden flex flex-col cursor-pointer hover:shadow-[0_0_15px_rgba(45,212,191,0.18)] transition-all duration-300 opacity-80 hover:opacity-100">
+                    <div class="absolute top-0 left-0 w-full h-1 bg-cyan-400 opacity-80"></div>
+                    <div class="p-4 border-b border-cyber-border bg-black/20 flex justify-between items-center">
+                        <div>
+                            <h3 class="font-bold text-white text-lg flex items-center gap-2">MLP <span id="tag-mlp" class="px-2 py-0.5 rounded bg-gray-500/10 text-gray-400 text-[10px] border border-gray-500/20">Standby 待命中</span></h3>
+                            <p class="text-xs text-gray-400 mt-1">基线架构：扁平特征前馈分类器</p>
+                        </div>
+                    </div>
+                    <div class="p-4 flex flex-col gap-5 flex-1">
+                        <div class="grid grid-cols-3 gap-3">
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">ACC (准确率)</p><p class="text-lg font-mono font-bold text-white" id="m5-acc">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">Precision</p><p class="text-lg font-mono font-bold text-cyber-primary" id="m5-pre">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">Recall</p><p class="text-lg font-mono font-bold text-cyber-success" id="m5-rec">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">F1-Score</p><p class="text-lg font-mono font-bold text-white" id="m5-f1">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">F2-Score</p><p class="text-lg font-mono font-bold text-white" id="m5-f2">--</p></div>
+                            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">DR (检测率)</p><p class="text-lg font-mono font-bold text-cyber-warning" id="m5-dr">--</p></div>
+                        </div>
+                        <div class="flex flex-col gap-2">
+                            <div class="flex justify-between items-center text-[11px] bg-black/20 px-3 py-2 rounded border border-cyber-border">
+                                <span class="text-gray-400">误报率 (FPR): <span class="text-cyber-warning font-mono font-bold ml-1" id="m5-fpr">--</span></span>
+                                <span class="text-gray-400">漏报率 (FNR): <span class="text-cyber-warning font-mono font-bold ml-1" id="m5-fnr">--</span></span>
+                            </div>
+                            <div class="flex justify-between items-center text-[11px] bg-black/20 px-3 py-2 rounded border border-cyber-border">
+                                <span class="text-gray-400">延迟: <span class="text-cyber-success font-mono font-bold ml-1" id="m5-lat">-- ms/条</span></span>
+                                <span class="text-gray-400">参数: <span class="text-cyber-success font-mono font-bold ml-1" id="m5-par">-- M</span></span>
+                                <span class="text-gray-400">吞吐: <span class="text-cyber-success font-mono font-bold ml-1" id="m5-tps">-- 条/s</span></span>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mt-auto pt-4 border-t border-cyber-border/50">
+                            <div class="flex flex-col items-center">
+                                <span class="text-[10px] text-gray-400 mb-1">混淆矩阵 (Confusion Matrix)</span>
+                                <div id="chart-cm-m5" class="h-28 w-full"></div>
+                            </div>
+                            <div class="flex flex-col items-center">
+                                <span class="text-[10px] text-gray-400 mb-1">ROC 曲线 (AUC: <span id="m5-auc" class="text-cyber-primary font-bold">--</span>)</span>
+                                <div id="chart-roc-m5" class="h-28 w-full"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+        <!-- ====== 模型评估体系 新增结束 ====== -->
+
     </main>
 
+    <!-- 图表支持脚本已移动到静态文件 -->
+
     <!-- Modal for Details (Hidden by default) -->
-    <div id="detailModal" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-        <div class="glass-card w-full max-w-lg rounded-xl shadow-2xl transform transition-all scale-95 opacity-0 animate-[fadeIn_0.2s_ease-out_forwards]">
-            <div class="p-6 border-b border-cyber-border flex justify-between items-center">
-                <h3 class="text-xl font-bold text-white">检测详情</h3>
-                <button onclick="closeModal()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-times"></i></button>
+    <div id="detailModal" onclick="if(event.target === this) closeModal()" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm">
+        <div onclick="event.stopPropagation()" class="glass-card w-full max-w-4xl max-h-[90vh] flex flex-col rounded-xl shadow-[0_0_30px_rgba(0,229,255,0.2)] transform transition-transform duration-300">
+            <!-- Header -->
+            <div class="p-5 border-b border-cyber-border flex justify-between items-center bg-cyber-bg/50">
+                <h3 class="text-xl font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-microscope text-cyber-primary"></i> 流量深度分析报告
+                </h3>
+                <button onclick="closeModal()" title="关闭详情" aria-label="关闭详情" class="text-gray-400 hover:text-white transition-colors">
+                    <i class="fa-solid fa-times text-xl"></i>
+                </button>
             </div>
-            <div class="p-6 space-y-4">
-                <div class="flex items-center justify-between">
-                    <span class="text-gray-400">文件名:</span>
-                    <span class="font-mono text-white" id="modalFileName">sample.pcap</span>
-                </div>
-                <!-- New Fields -->
-                <div class="flex items-center justify-between">
-                    <span class="text-gray-400">捕获时间 (Session Start):</span>
-                    <span class="font-mono text-white" id="modalCaptureTime">-</span>
-                </div>
-                <div class="flex items-center justify-between">
-                    <span class="text-gray-400">分析耗时:</span>
-                    <span class="font-mono text-cyber-primary" id="modalExecTime">-</span>
-                </div>
+            
+            <!-- Body -->
+            <div class="p-6 overflow-y-auto flex-1 grid grid-cols-1 lg:grid-cols-2 gap-6">
                 
-                <!-- Visualization -->
-                <div class="flex flex-col gap-2 mt-4">
-                     <span class="text-gray-400 text-sm">流量特征灰度图 (784 Bytes):</span>
-                     <div class="w-full flex justify-center bg-black/40 p-4 rounded border border-cyber-border/50">
-                         <img id="modalImage" src="" alt="Traffic Visualization" class="w-32 h-32 object-contain image-pixelated" style="image-rendering: pixelated;">
-                         <p id="modalNoImage" class="hidden text-xs text-gray-500">无法生成可视化图像</p>
-                     </div>
+                <!-- Left Column: Info & Visual -->
+                <div class="space-y-6">
+                    <!-- Basic Information -->
+                    <div class="bg-black/30 rounded-lg p-4 border border-cyber-border">
+                        <h4 class="text-sm font-semibold text-cyber-primary mb-3 border-b border-cyber-border/50 pb-2">基础元数据</h4>
+                        <div class="space-y-2 text-sm">
+                            <div class="flex justify-between"><span class="text-gray-400">文件名:</span> <span class="font-mono text-white truncate max-w-[200px]" title="" id="modalFileName">-</span></div>
+                            <div class="flex justify-between"><span class="text-gray-400">时间戳:</span> <span class="font-mono text-white" id="modalCaptureTime">-</span></div>
+                            <div class="flex justify-between"><span class="text-gray-400">检测耗时:</span> <span class="font-mono text-cyber-success" id="modalExecTime">-</span></div>
+                            <div class="flex justify-between"><span class="text-gray-400">协议栈:</span> <span class="font-mono text-white">Ethernet > IP > TCP/UDP</span></div>
+                        </div>
+                    </div>
+
+                    <!-- Prediction Result -->
+                    <div class="bg-black/30 rounded-lg p-4 border border-cyber-border">
+                        <h4 class="text-sm font-semibold text-cyber-primary mb-3 border-b border-cyber-border/50 pb-2">AI 预测结果</h4>
+                        <div class="space-y-4">
+                            <div class="flex items-center justify-between">
+                                <span class="text-gray-400">威胁判定:</span>
+                                <span class="px-3 py-1.5 rounded bg-cyber-danger/10 text-cyber-danger border border-cyber-danger/30 text-sm font-bold shadow-neon-red flex items-center gap-1" id="modalResult">
+                                    <i class="fa-solid fa-bug"></i> Malware
+                                </span>
+                            </div>
+                            <div class="text-sm text-gray-400">
+                                <div class="mb-1">Session 解析统计:</div>
+                                <div id="modalSessionParseReport" class="font-mono text-gray-300 leading-relaxed">-</div>
+                            </div>
+                            <div>
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span class="text-gray-400">模型置信度 (Confidence):</span>
+                                    <span class="font-mono text-cyber-primary" id="modalConfText">0.00%</span>
+                                </div>
+                                <div class="w-full bg-gray-800 rounded-full h-2.5 overflow-hidden">
+                                    <div class="bg-gradient-to-r from-cyan-500 to-blue-500 h-full rounded-full transition-all duration-1000 ease-out conf-bar-initial" id="modalConfBar"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- End New Fields -->
-                <div class="flex items-center justify-between mt-4">
-                    <span class="text-gray-400">预测类别:</span>
-                    <span class="px-2 py-1 rounded bg-cyber-danger/10 text-cyber-danger border border-cyber-danger/30 text-xs font-bold" id="modalResult">Malware</span>
-                </div>
-                <div class="flex items-center justify-between">
-                    <span class="text-gray-400">模型置信度:</span>
-                    <div class="w-1/2 bg-gray-700 rounded-full h-2">
-                        <div class="bg-cyber-primary h-2 rounded-full" style="width: 98%" id="modalConfBar"></div>
+                <!-- Right Column: Charts & Image -->
+                <div class="space-y-6 flex flex-col">
+                    <!-- Traffic Image -->
+                    <div class="bg-black/30 rounded-lg p-4 border border-cyber-border">
+                        <h4 class="text-sm font-semibold text-cyber-primary mb-3 border-b border-cyber-border/50 pb-2 flex justify-between">
+                            <span>应用层载荷特征图 (28x28)</span>
+                            <i class="fa-solid fa-expand text-gray-500 hover:text-white cursor-pointer" title="这代表提取的前784字节特征"></i>
+                        </h4>
+                        <div class="flex justify-center items-center bg-cyber-bg/50 rounded p-2 h-40">
+                             <img id="modalImage" src="" alt="Traffic Visualization" class="h-32 object-contain pixelated-image border border-gray-700 shadow-lg">
+                             <p id="modalNoImage" class="hidden text-sm text-gray-500"><i class="fa-regular fa-image mb-2 text-2xl block text-center"></i>暂无可视化图像数据</p>
+                        </div>
                     </div>
-                    <span class="font-mono text-cyber-primary text-sm" id="modalConfText">0.9823</span>
+
+                    <!-- Feature Distribution Chart area -->
+                    <div class="bg-black/30 rounded-lg p-4 border border-cyber-border flex-1 min-h-[220px] flex flex-col">
+                        <h4 class="text-sm font-semibold text-cyber-primary mb-2 border-b border-cyber-border/50 pb-2">前784字节分布分析</h4>
+                        <div id="modalBarChart" class="w-full flex-1"></div>
+                    </div>
                 </div>
-                <div class="mt-4 p-4 rounded bg-black/30 border border-cyber-border text-xs text-gray-400 font-mono">
-                    <p>> Extracting 5-tuple sessions...</p>
-                    <p>> Session truncate length: 784 bytes</p>
-                    <p>> Converting to grayscale image (28x28)...</p>
-                    <p>> Model Inference: CNN-BiLSTM</p>
-                    <p class="text-green-400">> Analysis Complete.</p>
+
+                <!-- Bottom Full-Width Column: Multidimensional Flow Table -->
+                <div class="col-span-1 lg:col-span-2 bg-black/30 rounded-lg p-4 border border-cyber-border overflow-hidden flex flex-col max-h-[300px]">
+                    <h4 class="text-sm font-semibold text-cyber-primary mb-3 border-b border-cyber-border/50 pb-2 flex justify-between items-center">
+                        <span><i class="fa-solid fa-network-wired"></i> 多元化流量特征分析 (Data Flows)</span>
+                        <span class="text-xs text-gray-400" id="modalFlowCount">0 Sessions</span>
+                    </h4>
+                    <div class="overflow-y-auto flex-1 custom-scrollbar">
+                        <table class="w-full text-left border-collapse text-xs">
+                            <thead class="sticky top-0 bg-cyber-card/90 backdrop-blur border-b border-cyber-border">
+                                <tr class="text-gray-400">
+                                    <th class="px-3 py-2 font-medium">源 IP:端口</th>
+                                    <th class="px-3 py-2 font-medium">目的 IP:端口</th>
+                                    <th class="px-3 py-2 font-medium">协议</th>
+                                    <th class="px-3 py-2 font-medium">应用层载荷(Bytes)</th>
+                                    <th class="px-3 py-2 font-medium">特征判定</th>
+                                </tr>
+                            </thead>
+                            <tbody id="modalFlowTableBody" class="text-gray-300">
+                                <!-- Flows will be injected here -->
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
+
             </div>
-            <div class="p-6 border-t border-cyber-border flex justify-end">
-                <button onclick="closeModal()" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-white">关闭</button>
+            
+            <!-- Footer execution log -->
+            <div class="px-6 py-3 bg-cyber-bg/80 border-t border-cyber-border text-xs text-green-400 font-mono flex items-center gap-2">
+                <i class="fa-solid fa-terminal"></i> <span>System: Analysis complete. Data passed through CNN-BiLSTM layers.</span>
             </div>
         </div>
     </div>
 
-    <!-- Script Logic -->
-    <script>
-        // --- ECharts Initialization ---
-        let lineChart, pieChart;
-
-        function initCharts() {
-            // Line Chart
-            lineChart = echarts.init(document.getElementById('lineChart'));
-            const lineOption = {
-                backgroundColor: 'transparent',
-                tooltip: { trigger: 'axis' },
-                grid: { top: '15%', left: '5%', right: '5%', bottom: '10%', containLabel: true },
-                xAxis: {
-                    type: 'category',
-                    boundaryGap: false,
-                    data: ['00:00', '00:10', '00:20', '00:30', '00:40', '00:50', '01:00'],
-                    axisLine: { lineStyle: { color: '#2A3447' } },
-                    axisLabel: { color: '#64748B' }
-                },
-                yAxis: {
-                    type: 'value',
-                    splitLine: { lineStyle: { color: '#2A3447', type: 'dashed' } },
-                    axisLabel: { color: '#64748B' }
-                },
-                series: [
-                    {
-                        name: '正常流量',
-                        type: 'line',
-                        smooth: true,
-                        itemStyle: { color: '#00D084' },
-                        areaStyle: {
-                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                                { offset: 0, color: 'rgba(0, 208, 132, 0.3)' },
-                                { offset: 1, color: 'rgba(0, 208, 132, 0)' }
-                            ])
-                        },
-                        data: [120, 132, 101, 134, 90, 230, 210]
-                    },
-                    {
-                        name: '恶意流量',
-                        type: 'line',
-                        smooth: true,
-                        itemStyle: { color: '#FF2E63' },
-                        areaStyle: {
-                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                                { offset: 0, color: 'rgba(255, 46, 99, 0.3)' },
-                                { offset: 1, color: 'rgba(255, 46, 99, 0)' }
-                            ])
-                        },
-                        data: [20, 12, 11, 34, 9, 30, 10]
-                    }
-                ]
-            };
-            lineChart.setOption(lineOption);
-
-            // Pie Chart
-            pieChart = echarts.init(document.getElementById('pieChart'));
-            const pieOption = {
-                backgroundColor: 'transparent',
-                tooltip: { trigger: 'item' },
-                legend: { bottom: '0%', textStyle: { color: '#94A3B8' }, icon: 'circle' },
-                series: [
-                    {
-                        name: '威胁类型',
-                        type: 'pie',
-                        radius: ['40%', '70%'],
-                        avoidLabelOverlap: false,
-                        itemStyle: {
-                            borderRadius: 10,
-                            borderColor: '#151B2D',
-                            borderWidth: 2
-                        },
-                        label: { show: false, position: 'center' },
-                        emphasis: {
-                            label: { show: true, fontSize: '18', fontWeight: 'bold', color: '#fff' }
-                        },
-                        labelLine: { show: false },
-                        data: [
-                            { value: 1048, name: 'Normal', itemStyle: { color: '#00D084' } },
-                            { value: 300, name: 'Malware', itemStyle: { color: '#FF2E63' } }
-                        ]
-                    }
-                ]
-            };
-            pieChart.setOption(pieOption);
-        }
-
-        window.addEventListener('resize', () => {
-            lineChart && lineChart.resize();
-            pieChart && pieChart.resize();
-        });
-
-        // --- File Upload Logic ---
-        const dropZone = document.getElementById('dropZone');
-        const fileInput = document.getElementById('fileInput');
-        const uploadContent = document.getElementById('uploadContent');
-        const loadingState = document.getElementById('loadingState');
-        const processStatus = document.getElementById('processStatus');
-
-        // Drag & Drop Events
-        dropZone.addEventListener('click', () => fileInput.click());
-        dropZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            dropZone.classList.add('border-cyber-primary', 'shadow-neon');
-        });
-        dropZone.addEventListener('dragleave', (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('border-cyber-primary', 'shadow-neon');
-        });
-        dropZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('border-cyber-primary', 'shadow-neon');
-            if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files[0]);
-        });
-        fileInput.addEventListener('change', () => {
-            if (fileInput.files.length) handleFiles(fileInput.files[0]);
-        });
-
-        function handleFiles(file) {
-            uploadFile(file);
-        }
-
-        async function uploadFile(file) {
-            // UI Update: Show Loading
-            uploadContent.classList.add('hidden');
-            loadingState.classList.remove('hidden');
-            dropZone.classList.add('scanning');
-
-            const formData = new FormData();
-            formData.append('file', file);
-
-            try {
-                // Determine file size to show
-                const size = (file.size / 1024).toFixed(2) + ' KB';
-                const timestamp = new Date().toLocaleTimeString();
-                
-                // Simulate processing steps text
-                setTimeout(() => processStatus.innerText = "读取 PCAP 文件...", 500);
-                setTimeout(() => processStatus.innerText = "提取五元组 Session...", 1500);
-                setTimeout(() => processStatus.innerText = "生成灰度图张量...", 2500);
-                setTimeout(() => processStatus.innerText = "输入 CNN-BiLSTM 模型...", 3500);
-
-                const response = await fetch('/analyze', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || 'Analyze failed');
-                }
-
-                const data = await response.json();
-                
-                // UI Update: Hide Loading
-                setTimeout(() => {
-                    loadingState.classList.add('hidden');
-                    uploadContent.classList.remove('hidden');
-                    dropZone.classList.remove('scanning');
-                    
-                    // Add Result to Table
-                    addResultRow(file.name, size, timestamp, data);
-                    
-                    // Update Stats
-                    updateStats(data);
-                }, 1000); // Small delay to show completion
-
-            } catch (error) {
-                console.error(error);
-                loadingState.classList.add('hidden');
-                uploadContent.classList.remove('hidden');
-                dropZone.classList.remove('scanning');
-                alert("检测失败: " + error.message);
-            }
-        }
-
-        let totalScans = 0;
-        let malwareCount = 0;
-
-        function updateStats(data) {
-            totalScans++;
-            if (data.status.includes('Malicious') || data.status.includes('Malware')) malwareCount++;
-            
-            document.getElementById('statTotal').innerText = totalScans;
-            document.getElementById('statMalware').innerText = malwareCount;
-            
-            // Update Pie Chart Data (Simple increment simulation)
-            const option = pieChart.getOption();
-            const isMalware = data.status.includes('Malicious') || data.status.includes('Malware');
-            if (isMalware) {
-                option.series[0].data[1].value++; 
-            } else {
-                option.series[0].data[0].value++;
-            }
-            pieChart.setOption(option);
-        }
-
-        function addResultRow(name, size, time, data) {
-            const tbody = document.getElementById('resultTableBody');
-            
-            // Remove "No data" row if exists
-            if (tbody.children[0] && tbody.children[0].innerText.includes('暂无检测记录')) {
-                tbody.innerHTML = '';
-            }
-
-            const isMalware = data.status.includes('Malicious') || data.status.includes('Malware');
-            const statusClass = isMalware 
-                ? 'bg-cyber-danger/10 text-cyber-danger border-cyber-danger/30' 
-                : 'bg-cyber-success/10 text-cyber-success border-cyber-success/30';
-            const statusIcon = isMalware ? '<i class="fa-solid fa-bug"></i>' : '<i class="fa-solid fa-check-circle"></i>';
-            const statusText = isMalware ? 'Malware' : 'Benign';
-
-            const row = document.createElement('tr');
-            row.className = 'border-b border-cyber-border/50 hover:bg-cyber-card/30 transition-colors animate-[fadeIn_0.5s_ease-out]';
-            
-            // Prepare modal call params using proper quotes
-            const displayConf = (parseFloat(data.confidence) * 100).toFixed(2);
-            // Default to '-' if undefined
-            const execTime = data.execution_time ? data.execution_time : '-';
-            const captureTime = data.capture_time ? data.capture_time : '-';
-            const imageData = data.image_data || '';
-            
-            row.innerHTML = `
-                <td class="px-6 py-4 font-mono text-white truncate max-w-[200px]" title="${name}">${name}</td>
-                <td class="px-6 py-4 text-gray-400">${time}</td>
-                <td class="px-6 py-4 font-mono text-cyan-400">${execTime}</td>
-                <td class="px-6 py-4 text-gray-400">${size}</td>
-                <td class="px-6 py-4">
-                    <span class="px-2 py-1 rounded border text-xs font-bold gap-1 inline-flex items-center ${statusClass}">
-                        ${statusIcon} ${statusText}
-                    </span>
-                </td>
-                <td class="px-6 py-4 font-mono text-cyber-primary">${displayConf}%</td>
-                <td class="px-6 py-4">
-                    <button class="text-gray-400 hover:text-white transition-colors text-sm underline view-details-btn">详情</button>
-                    <!-- Hidden input to store image data to avoid passing huge string in function call if needed, though closure usually handles it -->
-                </td>
-            `;
-            
-            // Explicitly set the click handler to avoid quote escaping issues in HTML string
-            const btn = row.querySelector('.view-details-btn');
-            
-            // Debug log
-            console.log("Setting up click handler for", name);
-            
-            btn.addEventListener('click', function() {
-                try {
-                    console.log("Details clicked for", name);
-                    showDetails(name, statusText, displayConf + '%', execTime, captureTime, imageData);
-                } catch (e) {
-                    console.error("Error in showDetails:", e);
-                    alert("显示详情时出错: " + e.message);
-                }
-            });
-            
-            tbody.insertBefore(row, tbody.firstChild);
-        }
-
-        // --- Stats Modal Logic ---
-        function showDetails(name, result, conf, execTime, captureTime, imageData) {
-            document.getElementById('modalFileName').innerText = name;
-            
-            // Set new fields
-            if(document.getElementById('modalExecTime')) document.getElementById('modalExecTime').innerText = execTime;
-            if(document.getElementById('modalCaptureTime')) document.getElementById('modalCaptureTime').innerText = captureTime;
-
-             // Handle Image
-            const imgEl = document.getElementById('modalImage');
-            const noImgEl = document.getElementById('modalNoImage');
-            
-            // Check if imageData is valid
-            if (imageData && typeof imageData === 'string' && imageData.length > 0) {
-                imgEl.src = "data:image/png;base64," + imageData;
-                imgEl.classList.remove('hidden');
-                if(noImgEl) noImgEl.classList.add('hidden');
-            } else {
-                imgEl.classList.add('hidden');
-                if(noImgEl) noImgEl.classList.remove('hidden');
-            }
-
-            const resultEl = document.getElementById('modalResult');
-            resultEl.innerText = result;
-            if(result === 'Malware') {
-                resultEl.className = "px-2 py-1 rounded bg-cyber-danger/10 text-cyber-danger border border-cyber-danger/30 text-xs font-bold";
-            } else {
-                resultEl.className = "px-2 py-1 rounded bg-cyber-success/10 text-cyber-success border border-cyber-success/30 text-xs font-bold";
-            }
-            
-            document.getElementById('modalConfText').innerText = conf;
-            const percentage = conf.replace('%', '');
-            document.getElementById('modalConfBar').style.width = percentage + '%';
-            
-            document.getElementById('detailModal').classList.remove('hidden');
-        }
-
-        function closeModal() {
-            document.getElementById('detailModal').classList.add('hidden');
-        }
-
-        // Initialize on load
-        document.addEventListener('DOMContentLoaded', () => {
-            initCharts();
-        });
-
-    </script>
+    <!-- 页面核心脚本拆分为模块化文件 -->
+    <script src="/static/js/liveGraph.js?v=20260519c"></script>
+    <script src="/static/js/modal.js?v=20260524b"></script>
+    <script src="/static/js/main.js?v=20260522a"></script>
 </body>
 </html>
