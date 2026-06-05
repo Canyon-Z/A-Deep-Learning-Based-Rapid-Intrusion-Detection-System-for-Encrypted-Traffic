@@ -1,7 +1,7 @@
-from fastapi import FastAPI, File, UploadFile, Request, Form
+from fastapi import FastAPI, File, UploadFile, Request, Form, Depends, HTTPException, status
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 import torch
 from torch import nn
 import shutil
@@ -357,6 +357,50 @@ def load_model():
 async def startup_event():
     load_model()
 
+# --- Auth Logic ---
+USER_DB_FILE = os.path.join(BASE_DIR, "web", "backend", "users.json")
+
+def verify_user(username, password):
+    if not os.path.exists(USER_DB_FILE):
+        return False
+    try:
+        import json
+        with open(USER_DB_FILE, "r", encoding="utf-8") as f:
+            users = json.load(f)
+            return users.get(username) == password
+    except Exception as e:
+        print(f"Failed to read user data: {e}")
+        return False
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request):
+    context = {"request": request, "error": ""}
+    try:
+        # 兼容最新版 FastAPI (Starlette 0.28.0+)
+        return templates.TemplateResponse(request=request, name="login.html", context=context)
+    except Exception:
+        # 兼容旧版本 FastAPI
+        return templates.TemplateResponse("login.html", context)
+
+@app.post("/login")
+def login(request: Request, username: str = Form(...), password: str = Form(...)):
+    if verify_user(username, password):
+        response = RedirectResponse(url="/dashboard", status_code=status.HTTP_302_FOUND)
+        response.set_cookie(key="session_user", value=username, max_age=3600*24)
+        return response
+    
+    context = {"request": request, "error": "用户名或密码不正确"}
+    try:
+        return templates.TemplateResponse(request=request, name="login.html", context=context)
+    except Exception:
+        return templates.TemplateResponse("login.html", context)
+
+@app.get("/logout")
+def logout():
+    response = RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+    response.delete_cookie("session_user")
+    return response
+
 @app.get("/model-status")
 def get_model_status():
     loaded_models = [name for name, model in _get_loaded_detection_models() if model is not None]
@@ -526,6 +570,16 @@ def get_training_metrics():
 
 @app.get("/")
 def read_root(request: Request):
+    return RedirectResponse(url="/login")
+
+
+@app.get("/dashboard")
+def dashboard(request: Request):
+    # Cookie Auth Validation
+    session_user = request.cookies.get("session_user")
+    if not session_user:
+        return RedirectResponse(url="/login")
+
     try:
         template_path = os.path.join(templates_dir, "index.html")
         with open(template_path, "r", encoding="utf-8") as f:

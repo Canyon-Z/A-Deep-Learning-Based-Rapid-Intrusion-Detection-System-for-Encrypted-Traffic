@@ -8,7 +8,7 @@ from threading import Timer
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 def open_browser():
-    webbrowser.open("http://127.0.0.1:8000")
+    webbrowser.open("http://127.0.0.1:8000/login")
 
 def run_web():
     import uvicorn
