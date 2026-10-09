@@ -18,7 +18,6 @@ from torchvision import transforms
 import base64
 import io
 
-# Add src to path
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(BASE_DIR)
 
@@ -46,19 +45,19 @@ class PureBiLSTM(nn.Module):
 
 app = FastAPI()
 
-# Mount static files
+# 挂载静态文件目录
 static_dir = os.path.join(BASE_DIR, "web", "static")
 if not os.path.exists(static_dir):
     os.makedirs(static_dir)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-# Templates
+# 模板目录
 templates_dir = os.path.join(BASE_DIR, "web", "templates")
 if not os.path.exists(templates_dir):
     os.makedirs(templates_dir)
 templates = Jinja2Templates(directory=templates_dir)
 
-# Global variables for models
+# 模型全局变量
 models: dict[str, Any] = {
     'cnn_bilstm': None,
     'classic_cnn': None,
@@ -71,10 +70,10 @@ device = None
 loading_error = None
 import time
 
-class_names = ['Benign', 'Malware'] # Default, should match training
+class_names = ['Benign', 'Malware']  # 默认类别名称，加载模型后会被覆盖
 
-# Per-model decision thresholds. Transformer is more conservative on this dataset,
-# so it needs a lower malware cutoff than the CNN family.
+# 每个模型有各自的恶意判决阈值。Transformer 在这个数据集上比较保守，
+# 所以对恶意类别的概率门槛比 CNN 系列低一些。
 MODEL_MALWARE_THRESHOLDS = {
     'cnn_bilstm': 0.65,
     'classic_cnn': 0.65,
@@ -105,14 +104,14 @@ ENSEMBLE_MODEL_ORDER = [
 
 ENSEMBLE_MODEL_TYPE = 'ensemble_vote'
 
-# Package-level aggregation policy:
-# If the fraction of sessions flagged as malicious >= PACKAGE_MALWARE_RATIO_THRESHOLD
-# OR the absolute number of malicious sessions >= PACKAGE_MALICIOUS_COUNT_MIN,
-# the whole capture is considered malicious. Adjust these to be more/less strict.
+# PCAP 包级聚合策略：
+# 如果被标记为恶意的会话占比 >= PACKAGE_MALWARE_RATIO_THRESHOLD，
+# 或者恶意会话的绝对数量 >= PACKAGE_MALICIOUS_COUNT_MIN，
+# 则将整个 PCAP 判定为恶意。调整这些值可以控制判定的严格程度。
 PACKAGE_MALWARE_RATIO_THRESHOLD = float(os.environ.get('PACKAGE_MALWARE_RATIO_THRESHOLD', 0.20))
 PACKAGE_MALICIOUS_COUNT_MIN = int(os.environ.get('PACKAGE_MALICIOUS_COUNT_MIN', 3))
-# Package-level confidence threshold: require average malware-session confidence >= this
-# before elevating package-level decision to 'Malicious'. Default 0.5 (50%).
+# 包级置信度阈值：只有当恶意会话的平均置信度 >= 该值时，
+# 才会将包级判定提升为'恶意'，默认 0.5 (50%)。
 PACKAGE_CONFIDENCE_THRESHOLD = float(os.environ.get('PACKAGE_CONFIDENCE_THRESHOLD', 0.50))
 
 def load_model():
@@ -183,7 +182,7 @@ def load_model():
                     f"(missing={best_choice['missing_count']}, unexpected={best_choice['unexpected_count']})."
                 )
                 
-            # Initialize CNN-BiLSTM (主力模型，对齐训练脚本的使用参数)
+            # 主力模型：CNN-BiLSTM，与训练脚本参数保持一致
             m1 = CNN_BiLSTM(num_classes=num_classes, hidden_dim=64)
             if best_choice['score'] == 0:
                 m1.load_state_dict(state_dict)
@@ -275,9 +274,9 @@ def load_model():
                             'dropout': float(ckpt_model_cfg.get('dropout', 0.3)),
                         })
 
-                    # Web-serving default config (used by run_training_all.py)
+                    # Web 端默认配置（与 run_training_all.py 一致）
                     candidate_cfgs.append({'input_dim': 28, 'd_model': 64, 'nhead': 4, 'num_layers': 2, 'dropout': 0.3})
-                    # Legacy/single-script training config (train_transformer.py)
+                    # 旧版单脚本训练配置（train_transformer.py）
                     candidate_cfgs.append({'input_dim': 28, 'd_model': 128, 'nhead': 8, 'num_layers': 4, 'dropout': 0.05})
 
                     dedup_cfgs = []
@@ -315,7 +314,7 @@ def load_model():
                     if m5 is None:
                         raise RuntimeError(f"No compatible Transformer architecture found for checkpoint. Last error: {last_error}")
                 else:
-                    # Fallback to a randomly initialized transformer so the UI can still run.
+                    # 退而求其次，用随机初始化的 transformer 保证 UI 还能跑
                     m5 = TrafficTransformer(input_dim=28, d_model=64, nhead=4, num_layers=2, num_classes=num_classes, dropout=0.3)
 
                 m5.to(device)
@@ -352,7 +351,7 @@ def load_model():
         loading_error = msg
         models['cnn_bilstm'] = None
 
-# Load model on startup
+# 启动时加载模型
 @app.on_event("startup")
 async def startup_event():
     load_model()
@@ -575,42 +574,34 @@ def read_root(request: Request):
 
 @app.get("/dashboard")
 def dashboard(request: Request):
-    # Cookie Auth Validation
+    # Cookie 认证校验
     session_user = request.cookies.get("session_user")
     if not session_user:
         return RedirectResponse(url="/login")
 
-    try:
-        template_path = os.path.join(templates_dir, "index.html")
-        with open(template_path, "r", encoding="utf-8") as f:
-            html = f.read()
-
-        status_block = ""
-        if models['cnn_bilstm'] is None:
-            error_text = loading_error or "Model not loaded. Please train the model first."
-            status_block = f'''
-            <div class="col-span-12">
-                <div class="bg-red-900/50 border border-red-500 text-red-200 px-6 py-4 rounded-xl relative shadow-neon-red flex items-start gap-4" role="alert">
-                    <i class="fa-solid fa-triangle-exclamation text-2xl text-red-500 mt-1"></i>
-                    <div class="flex-1">
-                        <strong class="font-bold text-lg">System Error: Model Not Loaded</strong>
-                        <p class="mt-1">Back-end AI model failed to initialize. Prediction services are unavailable.</p>
-                        <div class="mt-3 p-3 bg-black/30 rounded border border-red-500/30 font-mono text-xs text-red-300 overflow-x-auto">
-                            {error_text}
-                        </div>
-                        <p class="mt-3 text-sm text-gray-400">Please check if 'checkpoints/final_model.pth' exists and is compatible.</p>
+    status_block = ""
+    if models['cnn_bilstm'] is None:
+        error_text = loading_error or "Model not loaded. Please train the model first."
+        status_block = f'''
+        <div class="col-span-12">
+            <div class="bg-red-900/50 border border-red-500 text-red-200 px-6 py-4 rounded-xl relative shadow-neon-red flex items-start gap-4" role="alert">
+                <i class="fa-solid fa-triangle-exclamation text-2xl text-red-500 mt-1"></i>
+                <div class="flex-1">
+                    <strong class="font-bold text-lg">System Error: Model Not Loaded</strong>
+                    <p class="mt-1">Back-end AI model failed to initialize. Prediction services are unavailable.</p>
+                    <div class="mt-3 p-3 bg-black/30 rounded border border-red-500/30 font-mono text-xs text-red-300 overflow-x-auto">
+                        {error_text}
                     </div>
+                    <p class="mt-3 text-sm text-gray-400">Please check if 'checkpoints/final_model.pth' exists and is compatible.</p>
                 </div>
             </div>
-            '''
-
-        placeholder = "<!-- MODEL_STATUS_PLACEHOLDER -->"
-        if placeholder in html:
-            html = html.replace(placeholder, status_block, 1)
-
-        return HTMLResponse(content=html)
-    except Exception as exc:
-        return HTMLResponse(content=f"Homepage render failed: {exc}", status_code=500)
+        </div>
+        '''
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={"status_block": status_block}
+    )
 
 @app.post("/analyze")
 async def analyze_traffic(
@@ -624,7 +615,7 @@ async def analyze_traffic(
         return JSONResponse(status_code=500, content={"error": error_msg})
         
     start_time = time.time()
-    # Create a unique temp file to avoid name collisions and ensure uploads don't block each other
+    # 创建唯一临时文件，避免名称冲突和并发上传阻塞
     suffix = os.path.splitext(file.filename)[1] if file.filename else ''
     fd = None
     temp_file = None
@@ -637,8 +628,8 @@ async def analyze_traffic(
             
         # 1. Feature Extraction
         extractor = FeatureExtractor(truncate_len=784)
-        # Modified to handle both old and new FeatureExtractor signature if needed
-        # But we know we just updated it to return tuple
+        # 兼容新旧版本 FeatureExtractor 的返回签名（新版本返回元组）
+        # 新版本 FeatureExtractor 已改为返回元组
         pcap_result = extractor.pcap_to_sessions(temp_file)
         
         if isinstance(pcap_result, tuple):
@@ -657,7 +648,7 @@ async def analyze_traffic(
                 "session_parse_report": session_parse_report,
             })
 
-        # Process sessions
+        # 遍历所有会话
         malware_count = 0
         total_sessions = 0
         malicious_session_image_b64 = None
@@ -670,19 +661,19 @@ async def analyze_traffic(
         
         transform = transforms.Compose([transforms.ToTensor()])
         
-        # Output list for multiple flow details (Front-End Features)
+        # 批量输出多个流详情（供前端展示）
         flow_details = []
         
-        # Get session timestamp (first packet time) if available
+        # 获取会话时间戳（首个数据包的时间）
         session_start_time = "Unknown"
         if timestamps and len(timestamps) > 0:
             valid_ts = [t for t in timestamps.values() if t > 0]
             if valid_ts:
                 first_ts = min(valid_ts)
-                # Convert to readable string in Local Time
+                # 转换为本地时间字符串
                 session_start_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(first_ts))
 
-        # Batch Processing for Speed Optimization
+        # 批量推理以加速
         batch_tensors = []
         session_keys = []
         img_strs = []
@@ -693,7 +684,7 @@ async def analyze_traffic(
             # 2. Preprocess (784 bytes -> 28x28 img)
             img_array = extractor.process_session(session_bytes)
             
-            # Convert Session Image to Base64 for Visualization
+            # 将会话图片转成 Base64，便于前端可视化
             try:
                 hist, _ = np.histogram(img_array.flatten(), bins=16, range=(0, 256))
                 hist_lists.append(hist.tolist())
@@ -709,7 +700,7 @@ async def analyze_traffic(
                 img_strs.append(None)
                 hist_lists.append(None)
             
-            # Add to batch
+            # 收集到批次中
             img = Image.fromarray(img_array, mode='L')
             batch_tensors.append(transform(img))
             session_keys.append((session_key, len(session_bytes)))
@@ -800,7 +791,7 @@ async def analyze_traffic(
 
                     if is_malicious:
                         malware_count += 1
-                        # Capture the first malicious image found for display
+                        # 记录第一个发现的恶意图片，用于前端预览
                         if malicious_session_image_b64 is None and img_strs[i]:
                             malicious_session_image_b64 = img_strs[i]
                             malicious_session_hist = hist_lists[i]
@@ -878,13 +869,13 @@ async def analyze_traffic(
                             malicious_session_image_b64 = img_strs[i]
                             malicious_session_hist = hist_lists[i]
 
-        # Final Decision Logic (package-level aggregation)
-        # Consider the whole capture malicious only if either:
+        # 包级聚合判决逻辑
+        # 满足以下任一条件则认为整个 PCAP 是恶意的：
         #  - malicious session fraction >= PACKAGE_MALWARE_RATIO_THRESHOLD, OR
         #  - malicious session absolute count >= PACKAGE_MALICIOUS_COUNT_MIN
         malicious_fraction = (malware_count / total_sessions) if total_sessions > 0 else 0.0
 
-        # Allow per-request override of the package-level fraction threshold (value between 0 and 1)
+        # 允许通过请求参数覆盖包级比例阈值（取值 0~1）
         if package_threshold is not None:
             try:
                 pt = float(package_threshold)
@@ -897,10 +888,10 @@ async def analyze_traffic(
         else:
             pt = PACKAGE_MALWARE_RATIO_THRESHOLD
 
-        # Compute final average malware confidence (used to gate package-level decision)
+        # 计算恶意会话的平均置信度（用于包级判决的门控）
         avg_malware_conf = float(np.mean(malware_scores)) if malware_scores else 0.0
 
-        # Per-request override for package confidence threshold
+        # 允许通过请求参数覆盖包级置信度阈值
         if package_conf_threshold is not None:
             try:
                 pct_conf = float(package_conf_threshold)
@@ -913,8 +904,7 @@ async def analyze_traffic(
         else:
             pct_conf = PACKAGE_CONFIDENCE_THRESHOLD
 
-        # Only declare the package malicious if (count or ratio condition) AND
-        # the average malware-session confidence meets the package confidence threshold.
+        # 只有当 (数量条件或比例条件满足) 且 平均恶意置信度达到阈值时，才判定为恶意
         if ((malware_count >= PACKAGE_MALICIOUS_COUNT_MIN) or (malicious_fraction >= pt)) and (avg_malware_conf >= pct_conf):
             result_status = "Malicious Traffic Detected"
             chosen_scores = malware_scores if malware_scores else predicted_scores
@@ -926,7 +916,7 @@ async def analyze_traffic(
             result_status = "Benign Traffic"
             chosen_scores = benign_scores if benign_scores else predicted_scores
             final_conf = float(np.mean(chosen_scores)) if chosen_scores else 0.0
-            display_image = first_session_image_b64  # Show the first session if nothing bad found
+            display_image = first_session_image_b64  # 没发现恶意流量时展示第一个会话的图片
             display_hist = first_session_hist
         
         end_time = time.time()
@@ -984,7 +974,7 @@ capture_stats = {
     'last_update': None,
     'last_error': None
 }
-recent_flows = []  # circular buffer of recent detections
+recent_flows = []  # 最近检测结果的环形缓冲区
 MAX_RECENT = 50
 live_debug_logs = []
 MAX_DEBUG_LOGS = 300
@@ -1020,7 +1010,7 @@ def list_interfaces():
             ]
             return any(term in text for term in deny_terms)
 
-        # Prefer Windows adapter friendly names when available
+        # Windows 下优先使用适配器的友好名称
         if HAS_SCAPY:
             try:
                 for iface in get_windows_if_list():
@@ -1039,7 +1029,7 @@ def list_interfaces():
             except Exception:
                 pass
 
-        # Prefer psutil friendly names as fallback on non-Windows or if scapy list is empty
+        # 非 Windows 或 scapy 列表为空时，用 psutil 的友好名称兜底
         if (not result) and HAS_PSUTIL and psutil is not None:
             try:
                 for name in psutil.net_if_addrs().keys():
@@ -1049,7 +1039,7 @@ def list_interfaces():
             except Exception:
                 pass
 
-        # If nothing found, return empty list
+        # 什么都没有找到就返回空列表
         return JSONResponse(content={'status': 'success', 'interfaces': result})
     except Exception as e:
         return JSONResponse(status_code=500, content={'status': 'error', 'message': str(e)})
@@ -1074,7 +1064,7 @@ def start_live_capture(iface: str = Form(...), model_type: str = Form('cnn_bilst
 
     capture_stop_event = threading.Event()
     capture_stats['last_error'] = None
-    # Clear previous session data so a fresh live session starts quickly
+    # 清除上一次会话的残留数据，确保新的实时会话快速启动
     try:
         with capture_lock:
             recent_flows.clear()
@@ -1083,7 +1073,7 @@ def start_live_capture(iface: str = Form(...), model_type: str = Form('cnn_bilst
             capture_stats['total_packets'] = 0
             capture_stats['last_update'] = None
     except Exception:
-        # best-effort; do not fail start if clearing fails
+        # 尽力而为，清理失败不影响启动
         pass
 
     def packet_handler(pkt):
@@ -1096,7 +1086,7 @@ def start_live_capture(iface: str = Form(...), model_type: str = Form('cnn_bilst
                 print(msg)
             except Exception:
                 pass
-            # best-effort 5-tuple
+            # 尽力提取五元组
             src = pkt[IP].src if IP is not None and IP in pkt else '0.0.0.0'
             dst = pkt[IP].dst if IP is not None and IP in pkt else '0.0.0.0'
             proto = None
@@ -1115,12 +1105,12 @@ def start_live_capture(iface: str = Form(...), model_type: str = Form('cnn_bilst
 
             raw = bytes(pkt)
 
-            # Use FeatureExtractor to make an image-like array
+            # 用 FeatureExtractor 把数据流转成图片
             extractor = FeatureExtractor(truncate_len=784)
             try:
                 img_arr = extractor.process_session(raw)
             except Exception:
-                # Log processing error for debugging
+                # 记录处理错误便于调试
                 try:
                     msg = f"[live] FeatureExtractor.process_session failed, pkt_len={len(raw)}"
                     live_debug_logs.append(msg)
@@ -1130,8 +1120,7 @@ def start_live_capture(iface: str = Form(...), model_type: str = Form('cnn_bilst
                     pass
                 return
 
-            # Prepare tensor and run model
-            # Also prepare a small visualization (thumbnail PNG) and payload histogram
+            # 准备张量输入模型，同时生成缩略图和载荷直方图
             image_b64 = None
             payload_hist = None
             try:
@@ -1144,7 +1133,7 @@ def start_live_capture(iface: str = Form(...), model_type: str = Form('cnn_bilst
                 display_img.save(buffered, format="PNG")
                 image_b64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
             except Exception:
-                # best-effort: if visualization fails, continue without it
+                # 尽力而为，可视化失败不影响主流程
                 try:
                     live_debug_logs.append('[live] failed to build image/ histogram for pkt')
                     if len(live_debug_logs) > MAX_DEBUG_LOGS: live_debug_logs.pop(0)
@@ -1191,7 +1180,7 @@ def start_live_capture(iface: str = Form(...), model_type: str = Form('cnn_bilst
                 'model_type': ENSEMBLE_MODEL_TYPE if run_ensemble else requested_model_type,
                 'model_name': MODEL_DISPLAY_NAMES.get(ENSEMBLE_MODEL_TYPE if run_ensemble else requested_model_type, ENSEMBLE_MODEL_TYPE if run_ensemble else requested_model_type),
                 'captured_at': time.time(),
-                # Attach visualization and histogram similar to upload flow output
+                # 附上可视化和直方图，与文件上传分析的输出格式一致
                 'image_data': image_b64,
                 'payload_dist': payload_hist
             }
@@ -1232,10 +1221,10 @@ def start_live_capture(iface: str = Form(...), model_type: str = Form('cnn_bilst
             capture_stats['running'] = True
             capture_iface = resolve_iface(iface) if HAS_SCAPY else iface
             stop_event = capture_stop_event
-            # Run sniff in short-timeout loops so we can respond to stop requests
+            # 短超时循环抓包，方便及时响应停止请求
             while stop_event is not None and not stop_event.is_set():
                 try:
-                    # Use a short timeout so the loop can check the stop_event frequently
+                    # 用短超时让循环能频繁检查 stop_event
                     sniff(iface=capture_iface, prn=packet_handler, store=False, timeout=1)
                 except Exception as e:
                     capture_stats['last_error'] = str(e)
@@ -1246,7 +1235,7 @@ def start_live_capture(iface: str = Form(...), model_type: str = Form('cnn_bilst
             print('Live capture error:', e)
         finally:
             capture_stats['running'] = False
-            # Clean up globals so subsequent start/stop calls see the correct state
+            # 清理全局状态，让后续的 start/stop 调用看到正确状态
             try:
                 with capture_lock:
                     capture_thread = None
@@ -1266,7 +1255,7 @@ def stop_live_capture():
         return JSONResponse(content={'status': 'not_running'})
     try:
         capture_stop_event.set()
-        # Give the capture thread a short time to exit so running flag is cleared
+        # 给抓包线程一点时间退出，确保 running 标志被清除
         if capture_thread is not None and isinstance(capture_thread, threading.Thread):
             capture_thread.join(timeout=1.0)
     except Exception as e:

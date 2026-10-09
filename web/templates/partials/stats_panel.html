@@ -1,0 +1,80 @@
+<!-- Stats Cards -->
+<div class="grid grid-cols-2 gap-4">
+    <div class="glass-card p-4 rounded-xl border-l-4 border-cyber-primary">
+        <p class="text-gray-400 text-xs mb-1">今日检测总数</p>
+        <h4 class="text-2xl font-bold font-mono text-white" id="statTotal">0</h4>
+    </div>
+    <div class="glass-card p-4 rounded-xl border-l-4 border-cyber-danger">
+        <p class="text-gray-400 text-xs mb-1">恶意流量发现</p>
+        <h4 class="text-2xl font-bold font-mono text-cyber-danger" id="statMalware">0</h4>
+    </div>
+    <div class="glass-card p-4 rounded-xl border-l-4 border-cyber-success col-span-2">
+        <div class="flex justify-between items-center mb-2">
+            <div>
+                <p class="text-gray-400 text-xs mb-1">当前投票模式</p>
+                <p class="text-xs text-gray-500">ACC: <span id="statActiveAcc" class="font-mono text-white">--</span></p>
+            </div>
+            <div class="text-right">
+                <span id="activeModelBadge" class="px-2 py-1 rounded bg-cyber-success/10 text-cyber-success text-xs border border-cyber-success/20">投票模式</span>
+            </div>
+        </div>
+        <div class="mb-3 flex items-center justify-between rounded-lg border border-cyber-primary/30 bg-cyber-primary/10 px-3 py-2">
+            <span class="text-xs text-gray-300">当前推理模式</span>
+            <label class="flex items-center gap-2 text-xs font-bold text-cyber-primary cursor-pointer select-none">
+                <input id="votingModeToggle" type="checkbox" class="h-4 w-4 accent-cyber-primary" checked>
+                <span id="votingModeLabelText">6 模型投票已启用</span>
+            </label>
+        </div>
+        <div id="modelSelectorBox">
+            <select id="modelSelector" title="选择检测模型" aria-label="选择检测模型" class="w-full bg-cyber-bg border border-cyber-border rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-cyber-primary appearance-none">
+                <option value="cnn_bilstm" selected>CNN-BiLSTM (默认主力)</option>
+                <option value="classic_cnn">Classic CNN (经典卷积池化)</option>
+                <option value="lightweight_cnn">Lightweight CNN-BiLSTM (轻量化)</option>
+                <option value="pure_bilstm">Pure BiLSTM (纯双向长短期记忆)</option>
+                <option value="mlp">MLP (多层感知机基线)</option>
+                <option value="transformer">Transformer (自注意力机制)</option>
+            </select>
+        </div>
+        <script>
+            (async function(){
+                try{
+                    const r = await fetch('/static/checkpoints/model_metrics.json');
+                    if (!r.ok) return;
+                    const body = await r.json();
+                    const map = { 'CNN_BiLSTM':'m1', 'Classic_CNN':'m2', 'Lightweight_CNN_BiLSTM':'m3', 'Pure_BiLSTM':'m4', 'MLP':'m5', 'Transformer':'m6' };
+                    function setText(id, value) {
+                        const el = document.getElementById(id);
+                        if (!el) return;
+                        if (value === null || value === undefined || value === '') return;
+                        el.innerText = String(value);
+                    }
+                    function fmtPercent(value) {
+                        if (value === null || value === undefined || value === '') return '--';
+                        return String(value).includes('%') ? String(value) : String(value) + '%';
+                    }
+                    Object.keys(map).forEach(k=>{
+                        const node = body[k];
+                        if (!node) return;
+                        const prefix = map[k];
+                        setText(prefix + '-acc', node.test_accuracy || node.best_val_accuracy || node.best_accuracy);
+                        setText(prefix + '-pre', node.precision);
+                        setText(prefix + '-rec', node.recall);
+                        setText(prefix + '-f1', node.f1_score);
+                        setText(prefix + '-f2', node.f2_score);
+                        setText(prefix + '-dr', node.detection_rate);
+                        setText(prefix + '-fpr', fmtPercent(node.fpr));
+                        setText(prefix + '-fnr', fmtPercent(node.fnr));
+                        setText(prefix + '-lat', node.latency_ms_per_sample ? `${node.latency_ms_per_sample} ms/条` : '--');
+                        if (node.parameters || node.parameter_count) {
+                            setText(prefix + '-par', node.parameters || node.parameter_count);
+                        }
+                        setText(prefix + '-tps', node.throughput_samples_per_sec ? `${node.throughput_samples_per_sec} 条/s` : '--');
+                        setText(prefix + '-auc', node.auc);
+                    });
+                    // update statActiveAcc if selector present
+                    try{ const sel = document.getElementById('modelSelector'); if (sel) { const selected = sel.value; const prefix = {cnn_bilstm:'m1',classic_cnn:'m2',lightweight_cnn:'m3',pure_bilstm:'m4',mlp:'m5',transformer:'m6'}[selected]; const accEl = document.getElementById(prefix+'-acc'); if (accEl) { const stat = document.getElementById('statActiveAcc'); if (stat) stat.innerHTML = accEl.innerText.replace('%','') + '<span class="text-sm text-gray-500">%</span>'; } } }catch(e){}
+                }catch(e){ console.warn('metrics loader failed', e); }
+            })();
+        </script>
+    </div>
+</div>

@@ -1,0 +1,124 @@
+{# ====== 多维度模型评估考核系统 ======
+   使用 Jinja 宏将 6 个结构高度重复的模型卡片模板化，数据驱动渲染，
+   避免为每个模型维护一份几乎相同的 HTML。 #}
+{% macro model_card(m) -%}
+<div id="modelCard-{{ m.key }}" onclick="selectModel('{{ m.key }}', '{{ m.display }}')" class="glass-card rounded-xl {% if m.active %}border-2 border-cyber-success{% else %}border border-cyber-border{% endif %} relative overflow-hidden flex flex-col cursor-pointer {% if m.active %}shadow-[0_0_15px_rgba(0,208,132,0.3)]{% else %}hover:shadow-[0_0_15px_{{ m.hover_shadow }}]{% endif %} transition-all duration-300 {% if m.active %}transform scale-105 z-10 opacity-100{% else %}opacity-80 hover:opacity-100{% endif %}">
+    <div class="absolute top-0 left-0 w-full h-1 {{ m.topbar }} opacity-80"></div>
+    <div class="p-4 border-b border-cyber-border bg-black/20 flex justify-between items-center">
+        <div>
+            <h3 class="font-bold text-white text-lg flex items-center gap-2">{{ m.display }} <span id="tag-{{ m.key }}" class="px-2 py-0.5 rounded {% if m.active %}bg-cyber-success/10 text-cyber-success border border-cyber-success/20{% else %}bg-gray-500/10 text-gray-400 border border-gray-500/20{% endif %} text-[10px] font-bold">{% if m.active %}Active 当前使用{% else %}Standby 待命中{% endif %}</span></h3>
+            <p class="text-xs text-gray-400 mt-1">{{ m.desc }}</p>
+        </div>
+    </div>
+    <div class="p-4 flex flex-col gap-5 flex-1">
+        <!-- 核心基础指标 -->
+        <div class="grid grid-cols-3 gap-3">
+            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">ACC (准确率)</p><p class="text-lg font-mono font-bold text-white" id="{{ m.prefix }}-acc">{{ m.acc }}</p></div>
+            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">{{ m.pre_label }}</p><p class="text-lg font-mono font-bold text-cyber-primary" id="{{ m.prefix }}-pre">{{ m.pre }}</p></div>
+            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">{{ m.rec_label }}</p><p class="text-lg font-mono font-bold text-cyber-success" id="{{ m.prefix }}-rec">{{ m.rec }}</p></div>
+            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">F1-Score</p><p class="text-lg font-mono font-bold text-white" id="{{ m.prefix }}-f1">{{ m.f1 }}</p></div>
+            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">F2-Score</p><p class="text-lg font-mono font-bold text-white" id="{{ m.prefix }}-f2">{{ m.f2 }}</p></div>
+            <div class="bg-cyber-card/50 rounded p-2 text-center border border-cyber-border/50"><p class="text-[10px] text-gray-400 mb-1">DR (检测率)</p><p class="text-lg font-mono font-bold text-cyber-warning" id="{{ m.prefix }}-dr">{{ m.dr }}</p></div>
+        </div>
+        <!-- 安全场景与性能指标 -->
+        <div class="flex flex-col gap-2">
+            <div class="flex justify-between items-center text-[11px] bg-black/20 px-3 py-2 rounded border border-cyber-border">
+                <span class="text-gray-400">误报率 (FPR): <span class="{{ m.fpr_color }} font-mono font-bold ml-1" id="{{ m.prefix }}-fpr">{{ m.fpr }}</span></span>
+                <span class="text-gray-400">漏报率 (FNR): <span class="{{ m.fpr_color }} font-mono font-bold ml-1" id="{{ m.prefix }}-fnr">{{ m.fnr }}</span></span>
+            </div>
+            <div class="flex justify-between items-center text-[11px] bg-black/20 px-3 py-2 rounded border border-cyber-border">
+                <span class="text-gray-400">延迟: <span class="{{ m.lat_color }} font-mono font-bold ml-1" id="{{ m.prefix }}-lat">{{ m.lat }}</span></span>
+                <span class="text-gray-400">参数: <span class="{{ m.lat_color }} font-mono font-bold ml-1" id="{{ m.prefix }}-par">{{ m.par }}</span></span>
+                <span class="text-gray-400">吞吐: <span class="{{ m.lat_color }} font-mono font-bold ml-1" id="{{ m.prefix }}-tps">{{ m.tps }}</span></span>
+            </div>
+        </div>
+        <!-- 可视化图表区 -->
+        <div class="grid grid-cols-2 gap-4 mt-auto pt-4 border-t border-cyber-border/50">
+            <div class="flex flex-col items-center">
+                <span class="text-[10px] text-gray-400 mb-1">混淆矩阵 (Confusion Matrix)</span>
+                <div id="chart-cm-{{ m.prefix }}" class="h-28 w-full"></div>
+            </div>
+            <div class="flex flex-col items-center">
+                <span class="text-[10px] text-gray-400 mb-1">ROC 曲线 (AUC: <span id="{{ m.prefix }}-auc" class="text-cyber-primary font-bold">{{ m.auc }}</span>)</span>
+                <div id="chart-roc-{{ m.prefix }}" class="h-28 w-full"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{%- endmacro %}
+
+{% set models = [
+    {
+        'key': 'cnn_bilstm', 'display': 'CNN-BiLSTM',
+        'desc': '混合架构：空间局部特征 + 最优时序依赖',
+        'prefix': 'm1', 'topbar': 'bg-cyber-success', 'active': True, 'hover_shadow': '',
+        'pre_label': 'Precision(精确率)', 'rec_label': 'Recall (召回率)',
+        'fpr_color': 'text-cyber-danger', 'lat_color': 'text-white',
+        'acc': '--', 'pre': '--', 'rec': '--', 'f1': '--', 'f2': '--', 'dr': '--',
+        'fpr': '2.15%', 'fnr': '2.90%', 'lat': '12.4 ms/条', 'par': '2.1 M', 'tps': '450 条/s', 'auc': '0.98'
+    },
+    {
+        'key': 'classic_cnn', 'display': 'Classic-CNN',
+        'desc': '基础架构：纯卷积空间特征提取',
+        'prefix': 'm2', 'topbar': 'bg-cyber-border', 'active': False, 'hover_shadow': 'rgba(0,229,255,0.15)',
+        'pre_label': 'Precision', 'rec_label': 'Recall',
+        'fpr_color': 'text-cyber-warning', 'lat_color': 'text-white',
+        'acc': '--', 'pre': '--', 'rec': '--', 'f1': '--', 'f2': '--', 'dr': '--',
+        'fpr': '4.85%', 'fnr': '8.20%', 'lat': '8.2 ms/条', 'par': '1.5 M', 'tps': '720 条/s', 'auc': '0.93'
+    },
+    {
+        'key': 'lightweight_cnn', 'display': 'Lightweight CNN-BiLSTM',
+        'desc': '压缩架构：通道剪枝 + 低维时序',
+        'prefix': 'm3', 'topbar': 'bg-cyber-warning', 'active': False, 'hover_shadow': 'rgba(255,204,0,0.15)',
+        'pre_label': 'Precision', 'rec_label': 'Recall',
+        'fpr_color': 'text-cyber-warning', 'lat_color': 'text-cyber-success',
+        'acc': '94.50%', 'pre': '93.20%', 'rec': '95.00%', 'f1': '94.09%', 'f2': '94.25%', 'dr': '95.00%',
+        'fpr': '3.60%', 'fnr': '5.00%', 'lat': '4.5 ms/条', 'par': '0.6 M', 'tps': '1250 条/s', 'auc': '0.96'
+    },
+    {
+        'key': 'pure_bilstm', 'display': 'Pure BiLSTM',
+        'desc': '时序特征：双向长短期记忆网络',
+        'prefix': 'm4', 'topbar': 'bg-purple-500', 'active': False, 'hover_shadow': 'rgba(155,89,182,0.15)',
+        'pre_label': 'Precision', 'rec_label': 'Recall',
+        'fpr_color': 'text-cyber-warning', 'lat_color': 'text-cyber-success',
+        'acc': '--', 'pre': '--', 'rec': '--', 'f1': '--', 'f2': '--', 'dr': '--',
+        'fpr': '--', 'fnr': '--', 'lat': '-- ms/条', 'par': '-- M', 'tps': '-- 条/s', 'auc': '--'
+    },
+    {
+        'key': 'transformer', 'display': 'Transformer',
+        'desc': '全局特征：自注意力机制序列建模',
+        'prefix': 'm6', 'topbar': 'bg-red-500', 'active': False, 'hover_shadow': 'rgba(231,76,60,0.15)',
+        'pre_label': 'Precision', 'rec_label': 'Recall',
+        'fpr_color': 'text-cyber-warning', 'lat_color': 'text-cyber-success',
+        'acc': '--', 'pre': '--', 'rec': '--', 'f1': '--', 'f2': '--', 'dr': '--',
+        'fpr': '--', 'fnr': '--', 'lat': '-- ms/条', 'par': '-- M', 'tps': '-- 条/s', 'auc': '--'
+    },
+    {
+        'key': 'mlp', 'display': 'MLP',
+        'desc': '基线架构：扁平特征前馈分类器',
+        'prefix': 'm5', 'topbar': 'bg-cyan-400', 'active': False, 'hover_shadow': 'rgba(45,212,191,0.18)',
+        'pre_label': 'Precision', 'rec_label': 'Recall',
+        'fpr_color': 'text-cyber-warning', 'lat_color': 'text-cyber-success',
+        'acc': '--', 'pre': '--', 'rec': '--', 'f1': '--', 'f2': '--', 'dr': '--',
+        'fpr': '--', 'fnr': '--', 'lat': '-- ms/条', 'par': '-- M', 'tps': '-- 条/s', 'auc': '--'
+    }
+] %}
+
+<div class="col-span-12 flex flex-col gap-6 mt-4 border-t border-cyber-border pt-8" id="model-metrics-section">
+    <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded bg-cyber-primary/20 flex items-center justify-center text-cyber-primary shadow-neon">
+            <i class="fa-solid fa-layer-group"></i>
+        </div>
+        <div>
+            <h2 class="text-xl font-bold text-white tracking-wide">多维度模型效能评估中心</h2>
+            <p class="text-xs text-gray-400 mt-0.5">Multi-Model Performance & Security Metrics Matrix</p>
+        </div>
+    </div>
+
+    <!-- 三栏模型评估面板 -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {% for m in models %}
+        {{ model_card(m) }}
+        {% endfor %}
+    </div>
+</div>

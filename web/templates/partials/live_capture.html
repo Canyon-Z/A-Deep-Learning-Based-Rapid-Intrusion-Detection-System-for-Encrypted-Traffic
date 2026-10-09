@@ -1,0 +1,40 @@
+<!-- Live Capture Area (hidden by default) -->
+<div id="liveSection" class="glass-card rounded-xl p-6 relative overflow-hidden transition-all duration-300 hidden">
+    <h3 class="text-lg font-semibold text-white mb-3">实时抓包检测</h3>
+    <div class="flex gap-2 items-center mb-3">
+        <!-- 自定义网卡选择下拉框 -->
+        <div class="relative flex-none w-[242px] min-w-0" id="customSelectWrapper">
+            <div id="selectedDisplay"
+                 class="w-full rounded px-3 py-2 text-sm text-white bg-cyber-card/10 border border-cyber-border cursor-pointer flex justify-between items-center transition-all hover:border-cyber-primary">
+                <span id="selectedText" class="truncate">选择网卡</span>
+                <svg id="dropdownArrow" class="w-4 h-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                </svg>
+            </div>
+            <ul id="dropdownMenu"
+                class="absolute left-0 right-0 mt-1 rounded-lg bg-cyber-card/95 border border-cyber-border shadow-lg z-50 hidden max-h-60 overflow-y-auto text-sm">
+                <!-- options populated by JS -->
+            </ul>
+        </div>
+        <button id="refreshIfaces" class="px-3 py-2 bg-cyber-primary/10 text-cyber-primary border border-cyber-primary/30 rounded text-sm">刷新</button>
+    </div>
+    <div class="flex gap-2 mb-3">
+        <button id="startLiveBtn" class="px-4 py-2 bg-cyber-primary text-black rounded">开始</button>
+        <button id="stopLiveBtn" class="hidden px-4 py-2 bg-gray-700 text-white rounded">停止</button>
+    </div>
+    <div class="text-sm text-gray-400 mb-2">状态: <span id="liveStatus">停止</span></div>
+    <div id="liveError" class="hidden mb-2 text-xs text-red-300 bg-red-900/30 border border-red-500/30 rounded px-3 py-2"></div>
+    <div id="liveFlowGraphWrap" class="live-flow-graph-wrap h-[31rem] rounded-lg border border-cyber-border mb-3">
+        <div class="live-flow-toolbar">
+            <button id="clearLiveLogsBtn" type="button" class="live-flow-tool-btn" title="清除日志"><i class="fa-solid fa-trash"></i></button>
+            <button id="liveFlowZoomOut" type="button" class="live-flow-tool-btn" title="缩小"><i class="fa-solid fa-minus"></i></button>
+            <button id="liveFlowZoomReset" type="button" class="live-flow-tool-btn" title="重置"><i class="fa-solid fa-rotate-left"></i></button>
+            <button id="liveFlowZoomIn" type="button" class="live-flow-tool-btn" title="放大"><i class="fa-solid fa-plus"></i></button>
+        </div>
+        <div id="liveFlowTooltip" class="live-flow-tooltip hidden"></div>
+        <div id="liveFlowGraph" class="w-full h-full"></div>
+    </div>
+    <div class="h-16 overflow-auto bg-black/20 rounded p-1" id="liveFlowList">
+        <p class="text-sm text-gray-400">暂无实时流量</p>
+    </div>
+</div>

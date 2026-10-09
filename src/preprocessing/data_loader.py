@@ -11,7 +11,6 @@ import os
 import random
 import hashlib
 
-# Add project root to sys.path to allow running as script
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
 sys.path.append(project_root)
@@ -23,6 +22,7 @@ FEATURE_CACHE_VERSION = 2
 
 
 def _build_cache_key(pcap_file, truncate_len):
+    """根据文件路径、截断长度、修改时间和文件大小生成缓存键"""
     abs_path = os.path.abspath(pcap_file)
     try:
         stat = os.stat(abs_path)
@@ -33,6 +33,7 @@ def _build_cache_key(pcap_file, truncate_len):
 
 
 def _load_cached_sessions(cache_path):
+    """从 .npz 缓存加载已处理好的会话图像"""
     with np.load(cache_path, allow_pickle=False) as data:
         sessions = data["sessions"]
     if sessions.ndim == 2:
@@ -41,6 +42,7 @@ def _load_cached_sessions(cache_path):
 
 
 def _save_cached_sessions(cache_path, sessions, compress=False):
+    """把处理好的会话图像保存为 .npz 缓存，下次直接读取"""
     if sessions:
         arr = np.stack(sessions, axis=0).astype(np.uint8)
     else:
@@ -52,13 +54,11 @@ def _save_cached_sessions(cache_path, sessions, compress=False):
     else:
         np.savez(cache_path, sessions=arr)
 
+
 class TrafficDataset(Dataset):
+    """PyTorch Dataset，封装 28×28 流量灰度图和对应标签"""
+
     def __init__(self, data_list, labels_list, transform=None):
-        """
-        Custom PyTorch Dataset for traffic images.
-        data_list: List of numpy arrays (28x28)
-        labels_list: List of integer labels
-        """
         self.data = data_list
         self.labels = labels_list
         self.transform = transform
@@ -67,89 +67,56 @@ class TrafficDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        # Phase 3: Byte to Tensor Conversion (Tensor creation in Dataset)
-        item = self.data[idx] 
-        label = self.labels[idx] 
-        item = self.data[idx] 
-        label = self.labels[idx] 
-        
-        # Check if item is a file path or numpy array 
-        if isinstance(item, str): 
-            # Load image from file path using PIL 
-            img = Image.open(item).convert('L')  # Convert to grayscale 
-            if self.transform: 
-                img_tensor = self.transform(img) 
-            else: 
-                # Basic conversion if no transform is provided 
-                img_array = np.array(img) 
-                img_tensor = torch.from_numpy(img_array).float() / 255.0 
-                img_tensor = img_tensor.unsqueeze(0) 
-        else: 
-            # Handle numpy array 
-            img_array = item 
-            img = Image.fromarray(img_array, mode='L') 
-            if self.transform: 
-                img_tensor = self.transform(img) 
-            else: 
-                # Basic conversion if no transform is provided 
-                img_tensor = torch.from_numpy(img_array).float() / 255.0 
-                img_tensor = img_tensor.unsqueeze(0) 
-        # Check if item is a file path or numpy array 
-        if isinstance(item, str): 
-            # Load image from file path using PIL 
-            img = Image.open(item).convert('L')  # Convert to grayscale 
-            if self.transform: 
-                img_tensor = self.transform(img) 
-            else: 
-                # Basic conversion if no transform is provided 
-                img_array = np.array(img) 
-                img_tensor = torch.from_numpy(img_array).float() / 255.0 
-                img_tensor = img_tensor.unsqueeze(0) 
-        else: 
-            # Handle numpy array 
-            img_array = item 
-            img = Image.fromarray(img_array, mode='L') 
-            if self.transform: 
-                img_tensor = self.transform(img) 
-            else: 
-                # Basic conversion if no transform is provided 
-                img_tensor = torch.from_numpy(img_array).float() / 255.0 
-                img_tensor = img_tensor.unsqueeze(0) 
-            
-        return img_tensor, torch.tensor(label, dtype=torch.long) 
-    
+        item = self.data[idx]
+        label = self.labels[idx]
+
+        if isinstance(item, str):
+            img = Image.open(item).convert("L")
+            if self.transform:
+                img_tensor = self.transform(img)
+            else:
+                img_array = np.array(img)
+                img_tensor = torch.from_numpy(img_array).float() / 255.0
+                img_tensor = img_tensor.unsqueeze(0)
+        else:
+            img_array = item
+            img = Image.fromarray(img_array, mode="L")
+            if self.transform:
+                img_tensor = self.transform(img)
+            else:
+                img_tensor = torch.from_numpy(img_array).float() / 255.0
+                img_tensor = img_tensor.unsqueeze(0)
+
+        return img_tensor, torch.tensor(label, dtype=torch.long)
+
     @staticmethod
-    def load_data(data_dir): 
-        """ 
-        Load data from image files in the specified directory. 
-        Reads images from data/processed/Png or data/USTC-TFC2016/4_Png 
-        """ 
-        if not os.path.exists(data_dir): 
-            print(f"Data directory {data_dir} does not exist.") 
-            return [], [] 
-        
-        data_list = [] 
-        labels_list = [] 
-        
-        # Identify classes from subdirectories 
-        classes = [d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))] 
-        classes.sort()  # Ensure consistent ordering 
-        print(f"Found classes: {classes}") 
-        
-        class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)} 
-        
-        for cls_name in classes: 
-            cls_dir = os.path.join(data_dir, cls_name) 
-            img_files = glob.glob(os.path.join(cls_dir, '*.png')) + glob.glob(os.path.join(cls_dir, '*.jpg')) 
-            
-            label = class_to_idx[cls_name] 
-            print(f"Processing class '{cls_name}' from {cls_dir}...") 
-            
-            for img_file in tqdm(img_files, desc=f"Loading {cls_name}"): 
-                data_list.append(img_file) 
-                labels_list.append(label) 
-        
-        print(f"Loaded {len(data_list)} images from {data_dir}") 
+    def load_data(data_dir):
+        """从目录加载图片数据，子目录名作为类别标签"""
+        if not os.path.exists(data_dir):
+            print(f"Data directory {data_dir} does not exist.")
+            return [], []
+
+        data_list = []
+        labels_list = []
+
+        classes = [d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))]
+        classes.sort()
+        print(f"Found classes: {classes}")
+
+        class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
+
+        for cls_name in classes:
+            cls_dir = os.path.join(data_dir, cls_name)
+            img_files = glob.glob(os.path.join(cls_dir, "*.png")) + glob.glob(os.path.join(cls_dir, "*.jpg"))
+
+            label = class_to_idx[cls_name]
+            print(f"Processing class '{cls_name}' from {cls_dir}...")
+
+            for img_file in tqdm(img_files, desc=f"Loading {cls_name}"):
+                data_list.append(img_file)
+                labels_list.append(label)
+
+        print(f"Loaded {len(data_list)} images from {data_dir}")
         return data_list, labels_list 
 
 
@@ -165,44 +132,58 @@ def get_dataloaders(
     mask_fill=0,
 ):
     """
-    Phase 4: Dataset Splitting
-    Phase 5: PyTorch DataLoader Encapsulation
-    
-    Reads data from folders, preprocesses it, splits it, and returns DataLoaders.
-    Assumes directory structure: data_root/class_name/*.pcap
+    数据加载总入口：从原始 PCAP 一路处理到 PyTorch DataLoader。
+
+    处理流程:
+    1. 遍历 data_root 下的子目录（每个子目录是一个类别）
+    2. 把每个类别的 PCAP 文件按 7:1.5:1.5 拆成训练/验证/测试集
+    3. 用 FeatureExtractor 将 PCAP 转成 28×28 灰度图
+    4. 用 TrafficDataset + DataLoader 封装，传给训练脚本
+
+    参数:
+        data_root:      数据集根目录，下面有 Benign/Malware 等子目录
+        cache_dir:      特征缓存目录，默认 data_root/.feature_cache
+        use_cache:      启用缓存（跳过重复的特征提取）
+        rebuild_cache:  强制重建缓存
+        cache_compress: 使用压缩格式存储缓存
+        mask_headers:   训练时 MAC/IP 头部字段
+        mask_fill:      头部填充值 (0-255)
+
+    返回:
+        train_loader, val_loader, test_loader, class_to_idx
     """
     extractor = FeatureExtractor(
         truncate_len=truncate_len,
         mask_headers=mask_headers,
         mask_fill=mask_fill,
     )
-    
+
     if not os.path.exists(data_root):
         print(f"Data root {data_root} does not exist.")
-        # Return empty loaders or handle error better in production
         return None, None, None, {}
 
     if cache_dir is None:
         cache_dir = os.path.join(data_root, ".feature_cache")
     cache_dir = os.path.abspath(cache_dir)
 
-    # Identify classes from real data subdirectories only.
     classes = [
-        d for d in os.listdir(data_root)
+        d
+        for d in os.listdir(data_root)
         if os.path.isdir(os.path.join(data_root, d))
-        and not d.startswith('.')
+        and not d.startswith(".")
         and d != os.path.basename(cache_dir)
     ]
-    classes.sort() # Ensure consistent ordering
+    classes.sort()
     print(f"Found classes: {classes}")
 
     if use_cache:
         os.makedirs(cache_dir, exist_ok=True)
         print(f"Feature cache enabled at: {cache_dir}")
-    
+
     class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
 
     def split_pcap_files(file_list, seed=42):
+        """按文件级 7:1.5:1.5 拆分训练/验证/测试集"""
         shuffled = list(file_list)
         random.Random(seed).shuffle(shuffled)
         total = len(shuffled)
@@ -222,6 +203,7 @@ def get_dataloaders(
     cache_stats = {"hit": 0, "miss": 0, "rebuilt": 0}
 
     def ingest_pcap_files(pcap_files, target_data, target_labels, label, split_name, cls_name):
+        """从 PCAP 文件提取会话图片，支持缓存读/写"""
         for pcap_file in tqdm(pcap_files, desc=f"{split_name}:{cls_name}", leave=False):
             cached_images = None
             cache_path = None
@@ -280,45 +262,38 @@ def get_dataloaders(
 
     split_data = {"train": [], "val": [], "test": []}
     split_labels = {"train": [], "val": [], "test": []}
-    
+
     for cls_name in classes:
         cls_dir = os.path.join(data_root, cls_name)
-        # Search recursively under each class folder so both flat and nested layouts work.
-        pcap_files = glob.glob(os.path.join(cls_dir, '**', '*.pcap'), recursive=True)
-        
+        pcap_files = glob.glob(os.path.join(cls_dir, "**", "*.pcap"), recursive=True)
+
         label = class_to_idx[cls_name]
         print(f"Processing class '{cls_name}' from {cls_dir} ...")
         train_files, val_files, test_files = split_pcap_files(pcap_files)
-        ingest_pcap_files(train_files, split_data['train'], split_labels['train'], label, 'train', cls_name)
-        ingest_pcap_files(val_files, split_data['val'], split_labels['val'], label, 'val', cls_name)
-        ingest_pcap_files(test_files, split_data['test'], split_labels['test'], label, 'test', cls_name)
+        ingest_pcap_files(train_files, split_data["train"], split_labels["train"], label, "train", cls_name)
+        ingest_pcap_files(val_files, split_data["val"], split_labels["val"], label, "val", cls_name)
+        ingest_pcap_files(test_files, split_data["test"], split_labels["test"], label, "test", cls_name)
 
-    if not split_data['train'] and not split_data['val'] and not split_data['test']:
+    if not split_data["train"] and not split_data["val"] and not split_data["test"]:
         print("No data found.")
         return None, None, None, {}
 
-    # Define transforms
-    # ToTensor() converts a PIL Image or numpy.ndarray (H x W x C) in the range [0, 255]
-    # to a torch.FloatTensor of shape (C x H x W) in the range [0.0, 1.0]
-    transform = transforms.Compose([
-        transforms.ToTensor(), 
-    ])
-    
-    train_dataset = TrafficDataset(split_data['train'], split_labels['train'], transform=transform)
-    val_dataset = TrafficDataset(split_data['val'], split_labels['val'], transform=transform)
-    test_dataset = TrafficDataset(split_data['test'], split_labels['test'], transform=transform)
+    transform = transforms.Compose([transforms.ToTensor()])
 
-    # Phase 5: DataLoader Encapsulation
+    train_dataset = TrafficDataset(split_data["train"], split_labels["train"], transform=transform)
+    val_dataset = TrafficDataset(split_data["val"], split_labels["val"], transform=transform)
+    test_dataset = TrafficDataset(split_data["test"], split_labels["test"], transform=transform)
+
     use_cuda = torch.cuda.is_available()
     num_workers = 2 if use_cuda else 0
     loader_kwargs = {
-        'batch_size': batch_size,
-        'num_workers': num_workers,
-        'pin_memory': use_cuda,
+        "batch_size": batch_size,
+        "num_workers": num_workers,
+        "pin_memory": use_cuda,
     }
     if num_workers > 0:
-        loader_kwargs['persistent_workers'] = True
-        loader_kwargs['prefetch_factor'] = 2
+        loader_kwargs["persistent_workers"] = True
+        loader_kwargs["prefetch_factor"] = 2
 
     train_loader = DataLoader(train_dataset, shuffle=True, **loader_kwargs) if len(train_dataset) > 0 else None
     val_loader = DataLoader(val_dataset, shuffle=False, **loader_kwargs) if len(val_dataset) > 0 else None
@@ -330,5 +305,5 @@ def get_dataloaders(
             "Feature cache stats -> "
             f"hit: {cache_stats['hit']}, miss: {cache_stats['miss']}, rebuilt: {cache_stats['rebuilt']}"
         )
-    
+
     return train_loader, val_loader, test_loader, class_to_idx

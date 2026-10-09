@@ -1,0 +1,22 @@
+<!-- Upload Area -->
+<div id="dropZone" class="glass-card rounded-xl p-6 relative overflow-hidden group transition-all duration-300 hover:border-cyber-primary/50 hover:shadow-neon cursor-pointer">
+    <div class="scan-line"></div>
+    <input type="file" id="fileInput" class="hidden" accept=".pcap,.pcapng" multiple aria-label="上传 PCAP 文件" title="上传 PCAP 文件">
+
+    <div class="flex flex-col items-center justify-center py-8 text-center" id="uploadContent">
+        <div class="w-16 h-16 rounded-full bg-cyber-card border border-dashed border-cyber-border flex items-center justify-center text-3xl text-gray-500 mb-4 group-hover:text-cyber-primary group-hover:border-cyber-primary transition-colors">
+            <i class="fa-solid fa-cloud-upload-alt"></i>
+        </div>
+        <h3 class="text-lg font-semibold text-white mb-2">上传加密流量 (PCAP)</h3>
+        <p class="text-sm text-gray-400 mb-4">拖拽文件至此或点击上传，支持多选批量检测</p>
+        <button id="chooseFileBtn" type="button" class="px-6 py-2 bg-cyber-primary/10 text-cyber-primary border border-cyber-primary/30 rounded hover:bg-cyber-primary hover:text-black transition-all text-sm font-medium">选择文件</button>
+        <p class="text-xs text-gray-500 mt-4 font-mono">支持: .pcap, .pcapng (Max 500MB)</p>
+    </div>
+
+    <!-- Loading State (Hidden by default) -->
+    <div id="loadingState" class="hidden flex flex-col items-center justify-center py-10">
+        <div class="w-12 h-12 border-2 border-cyber-primary border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p class="text-cyber-primary font-mono text-sm animate-pulse">正在分析流量特征...</p>
+        <p class="text-gray-500 text-xs mt-2" id="processStatus">提取 Session 中...</p>
+    </div>
+</div>

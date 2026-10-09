@@ -1,0 +1,109 @@
+<!-- Modal for Details (Hidden by default) -->
+<div id="detailModal" onclick="if(event.target === this) closeModal()" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm">
+    <div onclick="event.stopPropagation()" class="glass-card w-full max-w-4xl max-h-[90vh] flex flex-col rounded-xl shadow-[0_0_30px_rgba(0,229,255,0.2)] transform transition-transform duration-300">
+        <!-- Header -->
+        <div class="p-5 border-b border-cyber-border flex justify-between items-center bg-cyber-bg/50">
+            <h3 class="text-xl font-bold text-white flex items-center gap-2">
+                <i class="fa-solid fa-microscope text-cyber-primary"></i> 流量深度分析报告
+            </h3>
+            <button onclick="closeModal()" title="关闭详情" aria-label="关闭详情" class="text-gray-400 hover:text-white transition-colors">
+                <i class="fa-solid fa-times text-xl"></i>
+            </button>
+        </div>
+
+        <!-- Body -->
+        <div class="p-6 overflow-y-auto flex-1 grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+            <!-- Left Column: Info & Visual -->
+            <div class="space-y-6">
+                <!-- Basic Information -->
+                <div class="bg-black/30 rounded-lg p-4 border border-cyber-border">
+                    <h4 class="text-sm font-semibold text-cyber-primary mb-3 border-b border-cyber-border/50 pb-2">基础元数据</h4>
+                    <div class="space-y-2 text-sm">
+                        <div class="flex justify-between"><span class="text-gray-400">文件名:</span> <span class="font-mono text-white truncate max-w-[200px]" title="" id="modalFileName">-</span></div>
+                        <div class="flex justify-between"><span class="text-gray-400">时间戳:</span> <span class="font-mono text-white" id="modalCaptureTime">-</span></div>
+                        <div class="flex justify-between"><span class="text-gray-400">检测耗时:</span> <span class="font-mono text-cyber-success" id="modalExecTime">-</span></div>
+                        <div class="flex justify-between"><span class="text-gray-400">协议栈:</span> <span class="font-mono text-white">Ethernet > IP > TCP/UDP</span></div>
+                    </div>
+                </div>
+
+                <!-- Prediction Result -->
+                <div class="bg-black/30 rounded-lg p-4 border border-cyber-border">
+                    <h4 class="text-sm font-semibold text-cyber-primary mb-3 border-b border-cyber-border/50 pb-2">AI 预测结果</h4>
+                    <div class="space-y-4">
+                        <div class="flex items-center justify-between">
+                            <span class="text-gray-400">威胁判定:</span>
+                            <span class="px-3 py-1.5 rounded bg-cyber-danger/10 text-cyber-danger border border-cyber-danger/30 text-sm font-bold shadow-neon-red flex items-center gap-1" id="modalResult">
+                                <i class="fa-solid fa-bug"></i> Malware
+                            </span>
+                        </div>
+                        <div class="text-sm text-gray-400">
+                            <div class="mb-1">Session 解析统计:</div>
+                            <div id="modalSessionParseReport" class="font-mono text-gray-300 leading-relaxed">-</div>
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-sm mb-1">
+                                <span class="text-gray-400">模型置信度 (Confidence):</span>
+                                <span class="font-mono text-cyber-primary" id="modalConfText">0.00%</span>
+                            </div>
+                            <div class="w-full bg-gray-800 rounded-full h-2.5 overflow-hidden">
+                                <div class="bg-gradient-to-r from-cyan-500 to-blue-500 h-full rounded-full transition-all duration-1000 ease-out conf-bar-initial" id="modalConfBar"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Charts & Image -->
+            <div class="space-y-6 flex flex-col">
+                <!-- Traffic Image -->
+                <div class="bg-black/30 rounded-lg p-4 border border-cyber-border">
+                    <h4 class="text-sm font-semibold text-cyber-primary mb-3 border-b border-cyber-border/50 pb-2 flex justify-between">
+                        <span>应用层载荷特征图 (28x28)</span>
+                        <i class="fa-solid fa-expand text-gray-500 hover:text-white cursor-pointer" title="这代表提取的前784字节特征"></i>
+                    </h4>
+                    <div class="flex justify-center items-center bg-cyber-bg/50 rounded p-2 h-40">
+                         <img id="modalImage" src="" alt="Traffic Visualization" class="h-32 object-contain pixelated-image border border-gray-700 shadow-lg">
+                         <p id="modalNoImage" class="hidden text-sm text-gray-500"><i class="fa-regular fa-image mb-2 text-2xl block text-center"></i>暂无可视化图像数据</p>
+                    </div>
+                </div>
+
+                <!-- Feature Distribution Chart area -->
+                <div class="bg-black/30 rounded-lg p-4 border border-cyber-border flex-1 min-h-[220px] flex flex-col">
+                    <h4 class="text-sm font-semibold text-cyber-primary mb-2 border-b border-cyber-border/50 pb-2">前784字节分布分析</h4>
+                    <div id="modalBarChart" class="w-full flex-1"></div>
+                </div>
+            </div>
+
+            <!-- Bottom Full-Width Column: Multidimensional Flow Table -->
+            <div class="col-span-1 lg:col-span-2 bg-black/30 rounded-lg p-4 border border-cyber-border overflow-hidden flex flex-col max-h-[300px]">
+                <h4 class="text-sm font-semibold text-cyber-primary mb-3 border-b border-cyber-border/50 pb-2 flex justify-between items-center">
+                    <span><i class="fa-solid fa-network-wired"></i> 多元化流量特征分析 (Data Flows)</span>
+                    <span class="text-xs text-gray-400" id="modalFlowCount">0 Sessions</span>
+                </h4>
+                <div class="overflow-y-auto flex-1 custom-scrollbar">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead class="sticky top-0 bg-cyber-card/90 backdrop-blur border-b border-cyber-border">
+                            <tr class="text-gray-400">
+                                <th class="px-3 py-2 font-medium">源 IP:端口</th>
+                                <th class="px-3 py-2 font-medium">目的 IP:端口</th>
+                                <th class="px-3 py-2 font-medium">协议</th>
+                                <th class="px-3 py-2 font-medium">应用层载荷(Bytes)</th>
+                                <th class="px-3 py-2 font-medium">特征判定</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modalFlowTableBody" class="text-gray-300">
+                            <!-- Flows will be injected here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Footer execution log -->
+        <div class="px-6 py-3 bg-cyber-bg/80 border-t border-cyber-border text-xs text-green-400 font-mono flex items-center gap-2">
+            <i class="fa-solid fa-terminal"></i> <span>System: Analysis complete. Data passed through CNN-BiLSTM layers.</span>
+        </div>
+    </div>
+</div>

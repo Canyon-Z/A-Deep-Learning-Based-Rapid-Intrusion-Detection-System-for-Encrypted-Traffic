@@ -15,9 +15,9 @@ try:
 except ImportError:
     wandb = None
 
-# from src.models.cnn_bilstm import CNN_BiLSTM 
 
 def _safe_auc(y_true, y_prob, class_names):
+    """计算 AUC，自动找到 Malware 类别作为正类"""
     malware_idx = 1
     for idx, cname in enumerate(class_names):
         if isinstance(cname, str) and ('malware' in cname.lower() or 'malicious' in cname.lower()):
@@ -33,6 +33,7 @@ def _safe_auc(y_true, y_prob, class_names):
 
 
 def _compute_metrics(y_true, y_pred, y_prob, inference_time_sec, class_names):
+    """计算分类相关的各项指标，包括准确率、精确率、召回率、F1、FPR、AUC 等"""
     precision = precision_score(y_true, y_pred, average='macro', zero_division=0)
     recall = recall_score(y_true, y_pred, average='macro', zero_division=0)
     f1 = f1_score(y_true, y_pred, average='macro', zero_division=0)
@@ -78,6 +79,7 @@ def _compute_metrics(y_true, y_pred, y_prob, inference_time_sec, class_names):
 
 
 def evaluate_model(model, dataloader, criterion, device, class_names):
+    """用测试集评估模型，返回各项指标"""
     model.eval()
     running_loss = 0.0
     total_samples = 0
@@ -116,19 +118,16 @@ def evaluate_model(model, dataloader, criterion, device, class_names):
 
 def train_model(model, train_loader, val_loader, test_loader=None, criterion=None, optimizer=None, num_epochs=50, device='cuda', config=None):
     """
-    Experiment Logging: wandb recording
-    - Model Structure/Hyperparameters (passed in config)
-    - Data Preprocessing info (passed in config)
-    - Training curves (loss, accuracy)
-    - Confusion Matrix
+    标准训练循环：每轮在训练集上前向/反向传播，在验证集上评估，
+    保存验证准确率最高的模型权重。
+
+    训练过程中会将 loss、accuracy、混淆矩阵等信息写入 wandb（如已安装）。
+    训练结束后把各项指标汇总写入 checkpoints/model_metrics.json。
     """
-    
     if config is None:
         config = {}
-        
-    # Initialize wandb
-    # Ensure you are logged in using `wandb login` in terminal before running
-    # If wandb is already initialized (e.g. via wandb agent), this will just update config
+
+    # 初始化 wandb（优先使用离线模式，避免需要 API key）
     if wandb is not None:
         try:
             print("初始化 WandB (如有需要请在终端输入 API Key，或提前运行 wandb offline)...")
@@ -138,19 +137,18 @@ def train_model(model, train_loader, val_loader, test_loader=None, criterion=Non
             print(f"WandB init failed: {e}. Running without wandb.")
     else:
         print("WandB 未安装，跳过实验日志。")
-    
-    # Track gradients and model topology
+
     if wandb is not None:
         try:
             wandb.watch(model, criterion, log="all", log_freq=10)
         except:
             pass
-    
+
     model.to(device)
     best_acc = 0.0
     best_metrics = {}
     best_state_dict = None
-    
+
     class_names = config.get('class_names', [str(i) for i in range(10)])
 
     print("\n================== 开始训练循环 ==================")
@@ -158,7 +156,6 @@ def train_model(model, train_loader, val_loader, test_loader=None, criterion=Non
         print(f'\n▶ Epoch [{epoch+1}/{num_epochs}]')
         print('-' * 40)
 
-        # Each epoch has a training and validation phase
         for phase in ['train', 'val']:
             if phase == 'train':
                 model.train()
@@ -170,15 +167,12 @@ def train_model(model, train_loader, val_loader, test_loader=None, criterion=Non
             running_loss = 0.0
             running_corrects = 0
             total_samples = 0
-            
-            # Lists for Confusion Matrix
+
             all_preds = []
             all_labels = []
             all_probs = []
             inference_time_sec = 0.0
 
-            # Iterate over data
-            # Use tqdm for progress bar
             pbar = tqdm(dataloader, desc=f"{phase} Phase")
             for inputs, labels in pbar:
                 inputs = inputs.to(device, non_blocking=(device.startswith('cuda') if isinstance(device, str) else device.type == 'cuda'))
@@ -186,7 +180,6 @@ def train_model(model, train_loader, val_loader, test_loader=None, criterion=Non
 
                 optimizer.zero_grad()
 
-                # Track history only if in train phase
                 with torch.set_grad_enabled(phase == 'train'):
                     infer_start = time.perf_counter()
                     outputs = model(inputs)
@@ -198,14 +191,12 @@ def train_model(model, train_loader, val_loader, test_loader=None, criterion=Non
                         loss.backward()
                         optimizer.step()
 
-                # Statistics
                 running_loss += loss.item() * inputs.size(0)
                 running_corrects += torch.sum(preds == labels.data)
                 total_samples += inputs.size(0)
-                
-                # Update progress bar
+
                 pbar.set_postfix({'loss': loss.item()})
-                
+
                 if phase == 'val':
                     all_preds.extend(preds.view(-1).cpu().numpy())
                     all_labels.extend(labels.view(-1).cpu().numpy())
@@ -215,11 +206,8 @@ def train_model(model, train_loader, val_loader, test_loader=None, criterion=Non
             epoch_loss = running_loss / total_samples
             epoch_acc = running_corrects.double() / total_samples
 
-            # Enhanced output format for better visibility in terminal
             print(f'➜ [{phase.upper()}] Loss: {epoch_loss:.4f} | Accuracy: {epoch_acc*100:.2f}% | Samples: {total_samples}')
 
-            # Log metrics to wandb
-            # Training curves (loss, accuracy)
             if wandb is not None:
                 try:
                     wandb.log({
@@ -230,7 +218,7 @@ def train_model(model, train_loader, val_loader, test_loader=None, criterion=Non
                 except:
                     pass
 
-            # Deep copy the model
+            # 保存验证集上最好的模型
             if phase == 'val' and epoch_acc > best_acc:
                 best_acc = epoch_acc
                 y_true = np.array(all_labels)
@@ -242,22 +230,19 @@ def train_model(model, train_loader, val_loader, test_loader=None, criterion=Non
                 best_metrics['val_loss'] = float(epoch_loss)
                 best_metrics['best_accuracy'] = float(epoch_acc) * 100.0
                 best_state_dict = copy.deepcopy(model.state_dict())
-                # torch.save(model.state_dict(), 'best_model.pth')
-            
-            # Log Confusion Matrix at the end of validation epoch (or just final epoch)
+
             if phase == 'val' and wandb is not None:
-                 # Compute Confusion Matrix Plot
-                 try:
-                     wandb.log({
-                         "confusion_matrix": wandb.plot.confusion_matrix(
-                             probs=None,
-                             y_true=all_labels,
-                             preds=all_preds,
-                             class_names=class_names
-                         )
-                     })
-                 except:
-                     pass
+                try:
+                    wandb.log({
+                        "confusion_matrix": wandb.plot.confusion_matrix(
+                            probs=None,
+                            y_true=all_labels,
+                            preds=all_preds,
+                            class_names=class_names
+                        )
+                    })
+                except:
+                    pass
 
     print('\n================== 训练结束 ==================')
     print(f'✅ Best Validation Accuracy: {best_acc*100:.2f}%')
@@ -269,20 +254,20 @@ def train_model(model, train_loader, val_loader, test_loader=None, criterion=Non
         test_metrics = evaluate_model(model, test_loader, criterion, device, class_names)
         if test_metrics is not None:
             print(f"✅ Test Accuracy: {test_metrics['accuracy']:.2f}%")
-    
-    # Finish wandb run
+
+    # 结束 wandb
     if wandb is not None:
         try:
             wandb.finish()
         except:
             pass
-    
-    # ---------------- 新增：保存指标到本地 JSON ----------------
+
+    # 保存指标到本地 JSON
     import json
-    
+
     model_name = config.get('model', 'unknown_model')
     metrics_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../checkpoints/model_metrics.json")
-    
+
     all_metrics = {}
     if os.path.exists(metrics_file):
         try:
@@ -298,24 +283,21 @@ def train_model(model, train_loader, val_loader, test_loader=None, criterion=Non
         "test_loss": f"{test_metrics['loss']:.4f}" if test_metrics else None,
         "best_accuracy": f"{test_metrics['accuracy']:.2f}%" if test_metrics else f"{best_metrics.get('best_accuracy', float(best_acc) * 100.0):.2f}%",
         "final_loss": f"{test_metrics['loss']:.4f}" if test_metrics else f"{best_metrics.get('val_loss', float(epoch_loss)):.4f}",
-        "precision": f"{test_metrics['precision']:.2f}" if test_metrics and test_metrics.get('precision') is not None else (f"{best_metrics['precision']:.2f}" if best_metrics.get('precision') is not None else None),
-        "recall": f"{test_metrics['recall']:.2f}" if test_metrics and test_metrics.get('recall') is not None else (f"{best_metrics['recall']:.2f}" if best_metrics.get('recall') is not None else None),
-        "f1_score": f"{test_metrics['f1_score']:.2f}" if test_metrics and test_metrics.get('f1_score') is not None else (f"{best_metrics['f1_score']:.2f}" if best_metrics.get('f1_score') is not None else None),
-        "f2_score": f"{test_metrics['f2_score']:.2f}" if test_metrics and test_metrics.get('f2_score') is not None else (f"{best_metrics['f2_score']:.2f}" if best_metrics.get('f2_score') is not None else None),
-        "detection_rate": f"{test_metrics['detection_rate']:.2f}" if test_metrics and test_metrics.get('detection_rate') is not None else (f"{best_metrics['detection_rate']:.2f}" if best_metrics.get('detection_rate') is not None else None),
-        "fpr": f"{test_metrics['fpr']:.2f}" if test_metrics and test_metrics.get('fpr') is not None else (f"{best_metrics['fpr']:.2f}" if best_metrics.get('fpr') is not None else None),
-        "fnr": f"{test_metrics['fnr']:.2f}" if test_metrics and test_metrics.get('fnr') is not None else (f"{best_metrics['fnr']:.2f}" if best_metrics.get('fnr') is not None else None),
-        "auc": f"{test_metrics['auc']:.4f}" if test_metrics and test_metrics.get('auc') is not None else (f"{best_metrics['auc']:.4f}" if best_metrics.get('auc') is not None else None),
-        "latency_ms_per_sample": f"{test_metrics['latency_ms_per_sample']:.4f}" if test_metrics and test_metrics.get('latency_ms_per_sample') is not None else (f"{best_metrics['latency_ms_per_sample']:.4f}" if best_metrics.get('latency_ms_per_sample') is not None else None),
-        "throughput_samples_per_sec": f"{test_metrics['throughput_samples_per_sec']:.2f}" if test_metrics and test_metrics.get('throughput_samples_per_sec') is not None else (f"{best_metrics['throughput_samples_per_sec']:.2f}" if best_metrics.get('throughput_samples_per_sec') is not None else None),
-        "epochs_trained": num_epochs,
-        "classes": class_names
+        "precision": f"{best_metrics.get('precision', 0):.2f}%",
+        "recall": f"{best_metrics.get('recall', 0):.2f}%",
+        "f1_score": f"{best_metrics.get('f1_score', 0):.2f}%",
+        "f2_score": f"{best_metrics.get('f2_score', 0):.2f}%",
+        "detection_rate": f"{best_metrics.get('detection_rate', 0):.2f}%",
+        "fpr": f"{best_metrics.get('fpr', 0):.2f}%" if best_metrics.get('fpr') is not None else "N/A",
+        "fnr": f"{best_metrics.get('fnr', 0):.2f}%" if best_metrics.get('fnr') is not None else "N/A",
+        "auc": f"{best_metrics.get('auc', 0):.4f}" if best_metrics.get('auc') is not None else "N/A",
+        "latency_ms_per_sample": f"{best_metrics.get('latency_ms_per_sample', 0):.4f}",
+        "throughput_samples_per_sec": f"{best_metrics.get('throughput_samples_per_sec', 0):.2f}",
     }
 
     os.makedirs(os.path.dirname(metrics_file), exist_ok=True)
     with open(metrics_file, 'w', encoding='utf-8') as f:
-        json.dump(all_metrics, f, indent=4, ensure_ascii=False)
-    print(f"[{model_name}] 评估指标已保存至: {metrics_file}")
-    # ---------------- 新增结束 ----------------
-    
-    return model
+        json.dump(all_metrics, f, indent=2, ensure_ascii=False)
+    print(f"Metrics saved to {metrics_file}")
+
+    return model, best_state_dict, test_metrics or best_metrics
