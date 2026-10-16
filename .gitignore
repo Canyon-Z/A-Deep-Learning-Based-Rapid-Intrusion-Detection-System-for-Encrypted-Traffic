@@ -1,5 +1,6 @@
 # Ignore dataset folder
 data/
+raw/
 
 # 本地凭据与运行时产物
 web/backend/users.json
@@ -10,6 +11,9 @@ web/backend/.session_secret
 # Python 字节码
 __pycache__/
 *.pyc
+
+# IDE / 编辑器缓存
+.vs/
 
 # 报告与文档资料（与代码无关，不入库）
 # 内含：变更报告、任务清单、代码审查报告、软著源码文档、软件说明书、
