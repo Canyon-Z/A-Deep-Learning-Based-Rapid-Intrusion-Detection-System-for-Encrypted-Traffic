@@ -111,7 +111,14 @@ python run.py
 uvicorn web.backend.main:app --host 0.0.0.0 --port 8000
 ```
 
-浏览器访问 `http://127.0.0.1:8000`，默认账号密码均为 `admin`。
+浏览器访问 `http://127.0.0.1:8000`。
+
+> 仓库不再附带任何明文账号，首次使用请自备账号，二选一：
+>
+> 1. 复制 `web/backend/users.example.json` 为 `web/backend/users.json`，把里面的
+>    `example_user` / `example_admin` 改成自己的用户名与密码（写明文即可，
+>    首次成功登录后会自动升级为 PBKDF2 哈希并原地回写）。该文件已被 `.gitignore` 忽略。
+> 2. 或用环境变量覆盖：`DLIDS_ADMIN_USER` / `DLIDS_ADMIN_PASSWORD`。
 
 ## 模型说明
 

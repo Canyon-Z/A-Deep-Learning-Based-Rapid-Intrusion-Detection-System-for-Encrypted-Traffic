@@ -10,3 +10,11 @@ web/backend/.session_secret
 # Python 字节码
 __pycache__/
 *.pyc
+
+# 报告与文档资料（与代码无关，不入库）
+# 内含：变更报告、任务清单、代码审查报告、软著源码文档、软件说明书、
+#       数据获取说明、重构截图等
+/reports/
+
+# 数据集（含有 USTC-TK2016 等原始/处理后数据，不入库）
+data_USTC-TK2016/
