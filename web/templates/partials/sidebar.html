@@ -1,0 +1,145 @@
+<!-- 左侧导航：5 个页面之间唯一的导航方式，页面刷新即整页渲染，不做任何 DOM 搬移 -->
+<aside class="app-sidebar">
+    <!-- 收起 / 展开的开关就是品牌图标本身：收起时它是侧栏里唯一还认得出的标志，
+         展开时它在标题左边 —— 位置始终不变，不用再单独放一个悬在边线上的圆钮。 -->
+    <div class="app-brand">
+        <button id="sidebarToggle" class="app-brand-icon" type="button" aria-controls="appNav"
+                aria-expanded="true" aria-label="收起或展开侧边导航" title="收起侧栏">
+            <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+        </button>
+        <span class="app-brand-text">
+            <span class="app-brand-name">加密流量入侵检测系统</span>
+            <span class="app-brand-code">DL-IDS</span>
+        </span>
+    </div>
+
+    <nav class="app-nav" id="appNav" aria-label="主导航">
+        <div class="app-nav-group">工作台</div>
+
+        <a href="/dashboard" class="app-nav-item{% if active_page == 'overview' %} is-active{% endif %}"
+           {% if active_page == 'overview' %}aria-current="page"{% endif %}>
+            <i class="fa-solid fa-gauge-high"></i><span>总览</span>
+        </a>
+
+        <a href="/upload" class="app-nav-item{% if active_page == 'upload' %} is-active{% endif %}"
+           {% if active_page == 'upload' %}aria-current="page"{% endif %}>
+            <i class="fa-solid fa-file-arrow-up"></i><span>上传检测</span>
+        </a>
+
+        <a href="/live" class="app-nav-item{% if active_page == 'live' %} is-active{% endif %}"
+           {% if active_page == 'live' %}aria-current="page"{% endif %}>
+            <i class="fa-solid fa-tower-broadcast"></i><span>实时抓包</span>
+        </a>
+
+        <a href="/records" class="app-nav-item{% if active_page == 'records' %} is-active{% endif %}"
+           {% if active_page == 'records' %}aria-current="page"{% endif %}>
+            <i class="fa-solid fa-list-ul"></i><span>检测记录</span>
+        </a>
+
+        <a href="/models" class="app-nav-item{% if active_page == 'models' %} is-active{% endif %}"
+           {% if active_page == 'models' %}aria-current="page"{% endif %}>
+            <i class="fa-solid fa-chart-simple"></i><span>模型评估</span>
+        </a>
+    </nav>
+
+    <div class="app-side-foot">
+        <div class="app-side-status">
+            <span id="systemStatusDot" class="status-dot"></span>
+            <span id="systemStatusText">检查中</span>
+        </div>
+        <!-- /logout 是 GET，直接跳转即可；服务端清 cookie 后重定向回 /login -->
+        <a href="/logout" class="btn btn-ghost btn-sm" title="退出登录">
+            <i class="fa-solid fa-right-from-bracket mr-1.5"></i><span>退出登录</span>
+        </a>
+    </div>
+</aside>
+
+<script>
+(function () {
+    var COLORS = { ok: 'var(--ds-success)', warn: 'var(--ds-warning)', error: 'var(--ds-danger)' };
+
+    function setSystemStatus(state, text) {
+        var dot = document.getElementById('systemStatusDot');
+        var label = document.getElementById('systemStatusText');
+        if (!dot || !label) return;
+        dot.style.background = COLORS[state] || COLORS.warn;
+        label.innerText = text;
+        label.title = text;
+    }
+
+    function refreshSystemStatus() {
+        return fetch('/model-status')
+            .then(function (r) {
+                if (!r.ok) {
+                    // 401 表示会话已过期或尚未登录，与后端故障区分开，避免误导用户去排查服务器。
+                    setSystemStatus('error', r.status === 401 ? '登录已过期，请重新登录' : '服务异常 HTTP ' + r.status);
+                    return null;
+                }
+                return r.json();
+            })
+            .then(function (data) {
+                if (!data) return;
+                var loaded = Array.isArray(data.loaded_models) ? data.loaded_models : [];
+                if (data.loaded && loaded.length === 6) {
+                    setSystemStatus('ok', '运行正常 · 6 模型就绪');
+                } else if (data.loaded) {
+                    setSystemStatus('warn', '部分模型就绪 ' + loaded.length + '/6');
+                } else {
+                    var reason = data.error ? String(data.error) : '模型未加载';
+                    setSystemStatus('error', reason.length > 48 ? reason.slice(0, 48) + '…' : reason);
+                }
+            })
+            .catch(function () { setSystemStatus('error', '无法连接后端'); });
+    }
+
+    window.refreshSystemStatus = refreshSystemStatus;
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refreshSystemStatus);
+    else refreshSystemStatus();
+    setInterval(refreshSystemStatus, 30000);
+})();
+</script>
+
+<script>
+// 侧栏收起 / 展开。默认收起（图标轨道），选择记在 localStorage 里，翻页后保持。
+// 收起时图标没有文字，靠 title 补提示；展开时文字就在旁边，把 title 去掉免得重复。
+(function () {
+    var RAIL_CLASS = 'is-rail';
+    var STORAGE_KEY = 'dlids_sidebar';
+
+    var sidebar = document.querySelector('.app-sidebar');
+    var toggle = document.getElementById('sidebarToggle');
+    if (!sidebar || !toggle) return;
+
+    var items = Array.prototype.slice.call(
+        sidebar.querySelectorAll('.app-nav-item, .app-side-foot .btn')
+    );
+
+    function labelOf(el) {
+        var span = el.querySelector('span');
+        var text = span ? span.textContent : el.textContent;
+        return String(text || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function sync() {
+        var rail = document.documentElement.classList.contains(RAIL_CLASS);
+        toggle.setAttribute('aria-expanded', rail ? 'false' : 'true');
+        toggle.title = rail ? '展开侧栏' : '收起侧栏';
+        items.forEach(function (el) {
+            if (rail) el.title = labelOf(el);
+            else el.removeAttribute('title');
+        });
+    }
+
+    toggle.addEventListener('click', function () {
+        var rail = document.documentElement.classList.toggle(RAIL_CLASS);
+        try {
+            localStorage.setItem(STORAGE_KEY, rail ? 'collapsed' : 'expanded');
+        } catch (e) {
+            // localStorage 不可用时只是记不住选择，不影响本次展开/收起
+        }
+        sync();
+    });
+
+    sync();
+})();
+</script>

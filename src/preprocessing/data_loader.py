@@ -18,17 +18,19 @@ sys.path.append(project_root)
 from src.preprocessing.feature_extraction import FeatureExtractor
 
 
-FEATURE_CACHE_VERSION = 2
+# 代码审查第 41 条：truncate_len 已从缓存键里去掉（它本来就没参与特征提取），
+# 键的语义变了，因此把版本号 +1，避免继续命中按旧规则算出的缓存文件。
+FEATURE_CACHE_VERSION = 3
 
 
-def _build_cache_key(pcap_file, truncate_len):
-    """根据文件路径、截断长度、修改时间和文件大小生成缓存键"""
+def _build_cache_key(pcap_file):
+    """根据文件路径、修改时间和文件大小生成缓存键"""
     abs_path = os.path.abspath(pcap_file)
     try:
         stat = os.stat(abs_path)
-        raw = f"{FEATURE_CACHE_VERSION}|{abs_path}|{truncate_len}|{stat.st_mtime_ns}|{stat.st_size}"
+        raw = f"{FEATURE_CACHE_VERSION}|{abs_path}|{stat.st_mtime_ns}|{stat.st_size}"
     except OSError:
-        raw = f"{FEATURE_CACHE_VERSION}|{abs_path}|{truncate_len}|missing"
+        raw = f"{FEATURE_CACHE_VERSION}|{abs_path}|missing"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -123,7 +125,6 @@ class TrafficDataset(Dataset):
 def get_dataloaders(
     data_root,
     batch_size=32,
-    truncate_len=784,
     cache_dir=None,
     use_cache=True,
     rebuild_cache=False,
@@ -153,7 +154,6 @@ def get_dataloaders(
         train_loader, val_loader, test_loader, class_to_idx
     """
     extractor = FeatureExtractor(
-        truncate_len=truncate_len,
         mask_headers=mask_headers,
         mask_fill=mask_fill,
     )
@@ -211,7 +211,7 @@ def get_dataloaders(
             tqdm.write(f"[{split_name}:{cls_name}] 处理 {file_name}")
 
             if use_cache:
-                cache_key = _build_cache_key(pcap_file, truncate_len)
+                cache_key = _build_cache_key(pcap_file)
                 cache_path = os.path.join(cache_dir, f"{cache_key}.npz")
                 if not rebuild_cache and os.path.exists(cache_path):
                     try:

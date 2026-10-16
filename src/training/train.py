@@ -45,6 +45,8 @@ def _compute_metrics(y_true, y_pred, y_prob, inference_time_sec, class_names):
             break
 
     cm = confusion_matrix(y_true, y_pred, labels=list(range(len(class_names))))
+    recall_malware = None
+    recall_benign = None
     if len(class_names) == 2 and cm.shape == (2, 2):
         neg_idx = 1 - malware_idx
         tp = cm[malware_idx, malware_idx]
@@ -53,6 +55,10 @@ def _compute_metrics(y_true, y_pred, y_prob, inference_time_sec, class_names):
         tn = cm[neg_idx, neg_idx]
         fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
         fnr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
+        # 检出率只针对恶意类：TP/(TP+FN)，与 1-FNR 严格一致。
+        # 不能复用 macro recall，否则与 FNR 口径矛盾。
+        recall_malware = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        recall_benign = tn / (tn + fp) if (tn + fp) > 0 else 0.0
     else:
         fpr = None
         fnr = None
@@ -69,7 +75,12 @@ def _compute_metrics(y_true, y_pred, y_prob, inference_time_sec, class_names):
         'recall': float(recall) * 100.0,
         'f1_score': float(f1) * 100.0,
         'f2_score': float((5 * precision * recall / (4 * precision + recall)) if (4 * precision + recall) > 0 else 0.0) * 100.0,
-        'detection_rate': float(recall) * 100.0,
+        # detection_rate 与 FNR 同源，都是"恶意类"口径，保证 DR == 100 - FNR；
+        # 旧实现直接复用 macro recall，导致同一文件里 DR 与 FNR 互相矛盾。
+        'detection_rate': (float(recall_malware) * 100.0) if recall_malware is not None else float(recall) * 100.0,
+        'recall_malware': (float(recall_malware) * 100.0) if recall_malware is not None else None,
+        'recall_benign': (float(recall_benign) * 100.0) if recall_benign is not None else None,
+        'macro_recall': float(recall) * 100.0,
         'fpr': (float(fpr) * 100.0) if fpr is not None else None,
         'fnr': (float(fnr) * 100.0) if fnr is not None else None,
         'auc': auc,
@@ -276,6 +287,59 @@ def train_model(model, train_loader, val_loader, test_loader=None, criterion=Non
         except:
             pass
 
+    def _fmt_pct(mapping, key):
+        value = mapping.get(key) if mapping else None
+        return f"{float(value):.2f}%" if value is not None else "N/A"
+
+    def _fmt_num(mapping, key, digits=4):
+        value = mapping.get(key) if mapping else None
+        return f"{float(value):.{digits}f}" if value is not None else "N/A"
+
+    # 验证集口径（验证集上最佳 epoch 的指标），与测试集口径分开保存，
+    # 避免前端把两种来源的数字混在一起比较。
+    val_block = {
+        "precision": _fmt_pct(best_metrics, 'precision'),
+        "recall": _fmt_pct(best_metrics, 'recall'),
+        "f1_score": _fmt_pct(best_metrics, 'f1_score'),
+        "f2_score": _fmt_pct(best_metrics, 'f2_score'),
+        "detection_rate": _fmt_pct(best_metrics, 'detection_rate'),
+        "fpr": _fmt_pct(best_metrics, 'fpr'),
+        "fnr": _fmt_pct(best_metrics, 'fnr'),
+        "auc": _fmt_num(best_metrics, 'auc'),
+        "latency_ms_per_sample": _fmt_num(best_metrics, 'latency_ms_per_sample'),
+        "throughput_samples_per_sec": _fmt_num(best_metrics, 'throughput_samples_per_sec', 2),
+        "recall_malware": _fmt_pct(best_metrics, 'recall_malware'),
+        "recall_benign": _fmt_pct(best_metrics, 'recall_benign'),
+        "macro_recall": _fmt_pct(best_metrics, 'macro_recall'),
+        "val_precision": _fmt_pct(best_metrics, 'precision'),
+        "val_recall": _fmt_pct(best_metrics, 'recall'),
+        "val_f1_score": _fmt_pct(best_metrics, 'f1_score'),
+        "val_f2_score": _fmt_pct(best_metrics, 'f2_score'),
+        "val_detection_rate": _fmt_pct(best_metrics, 'detection_rate'),
+        "val_fpr": _fmt_pct(best_metrics, 'fpr'),
+        "val_fnr": _fmt_pct(best_metrics, 'fnr'),
+        "val_auc": _fmt_num(best_metrics, 'auc'),
+        "val_latency_ms_per_sample": _fmt_num(best_metrics, 'latency_ms_per_sample'),
+        "val_throughput_samples_per_sec": _fmt_num(best_metrics, 'throughput_samples_per_sec', 2),
+    }
+
+    test_block = {}
+    if test_metrics:
+        test_block = {
+            "test_precision": _fmt_pct(test_metrics, 'precision'),
+            "test_recall": _fmt_pct(test_metrics, 'recall'),
+            "test_f1_score": _fmt_pct(test_metrics, 'f1_score'),
+            "test_f2_score": _fmt_pct(test_metrics, 'f2_score'),
+            "test_detection_rate": _fmt_pct(test_metrics, 'detection_rate'),
+            "test_fpr": _fmt_pct(test_metrics, 'fpr'),
+            "test_fnr": _fmt_pct(test_metrics, 'fnr'),
+            "test_auc": _fmt_num(test_metrics, 'auc'),
+            "test_latency_ms_per_sample": _fmt_num(test_metrics, 'latency_ms_per_sample'),
+            "test_throughput_samples_per_sec": _fmt_num(test_metrics, 'throughput_samples_per_sec', 2),
+            "test_recall_malware": _fmt_pct(test_metrics, 'recall_malware'),
+            "test_recall_benign": _fmt_pct(test_metrics, 'recall_benign'),
+        }
+
     all_metrics[model_name] = {
         "best_val_accuracy": f"{best_metrics.get('best_accuracy', float(best_acc) * 100.0):.2f}%",
         "best_val_loss": f"{best_metrics.get('val_loss', float(epoch_loss)):.4f}",
@@ -283,16 +347,8 @@ def train_model(model, train_loader, val_loader, test_loader=None, criterion=Non
         "test_loss": f"{test_metrics['loss']:.4f}" if test_metrics else None,
         "best_accuracy": f"{test_metrics['accuracy']:.2f}%" if test_metrics else f"{best_metrics.get('best_accuracy', float(best_acc) * 100.0):.2f}%",
         "final_loss": f"{test_metrics['loss']:.4f}" if test_metrics else f"{best_metrics.get('val_loss', float(epoch_loss)):.4f}",
-        "precision": f"{best_metrics.get('precision', 0):.2f}%",
-        "recall": f"{best_metrics.get('recall', 0):.2f}%",
-        "f1_score": f"{best_metrics.get('f1_score', 0):.2f}%",
-        "f2_score": f"{best_metrics.get('f2_score', 0):.2f}%",
-        "detection_rate": f"{best_metrics.get('detection_rate', 0):.2f}%",
-        "fpr": f"{best_metrics.get('fpr', 0):.2f}%" if best_metrics.get('fpr') is not None else "N/A",
-        "fnr": f"{best_metrics.get('fnr', 0):.2f}%" if best_metrics.get('fnr') is not None else "N/A",
-        "auc": f"{best_metrics.get('auc', 0):.4f}" if best_metrics.get('auc') is not None else "N/A",
-        "latency_ms_per_sample": f"{best_metrics.get('latency_ms_per_sample', 0):.4f}",
-        "throughput_samples_per_sec": f"{best_metrics.get('throughput_samples_per_sec', 0):.2f}",
+        **val_block,
+        **test_block,
     }
 
     os.makedirs(os.path.dirname(metrics_file), exist_ok=True)

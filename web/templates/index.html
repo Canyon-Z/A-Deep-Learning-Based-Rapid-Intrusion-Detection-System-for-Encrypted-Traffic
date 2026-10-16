@@ -1,40 +1,17 @@
-{% include "partials/head.html" %}
-<body class="bg-cyber-bg min-h-screen flex flex-col">
+{% extends "base.html" %}
 
-    {% include "partials/navbar.html" %}
-
-    <!-- Main Content -->
-    <main class="flex-1 container mx-auto px-6 pt-24 pb-8 grid grid-cols-12 gap-6">
-
-        <!-- View Toggle (Top Center) -->
-        <div class="col-span-12 flex justify-center">
-            <div class="inline-flex items-center p-1 rounded-full bg-cyber-card/80 border border-cyber-border backdrop-blur-sm shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]">
-                <button id="tabUpload" class="px-4 py-1.5 rounded-full text-sm text-gray-300 transition-all duration-200 ease-out">上传检测</button>
-                <button id="tabLive" class="px-4 py-1.5 rounded-full text-sm text-gray-300 transition-all duration-200 ease-out">实时抓包</button>
-            </div>
-        </div>
-
-        {{ status_block | safe }}
-
-        <!-- Left Column: Upload & Stats (4 cols) -->
-        <div class="col-span-12 lg:col-span-3 flex flex-col gap-6">
-            {% include "partials/upload_area.html" %}
-            {% include "partials/live_capture.html" %}
-            {% include "partials/stats_panel.html" %}
-            {% include "partials/threat_chart.html" %}
-        </div>
-
-        <!-- Right Column: Charts & Logs (8 cols) -->
-        <div id="rightColumn" class="col-span-12 lg:col-span-9 flex flex-col gap-6">
-            {% include "partials/trend_chart.html" %}
-            <div id="liveGraphSwapSlot" class="hidden"></div>
+{% block content %}
+<div class="grid-12">
+    <div class="col-8">
+        {% include "partials/trend_chart.html" %}
+    </div>
+    <div class="col-4">
+        {% include "partials/threat_chart.html" %}
+    </div>
+    <div class="col-12">
+        {% with result_title='最近检测记录', result_hint='上传与实时抓包合并显示，按时间倒序', result_mode='all', result_clear_label='清除全部' %}
             {% include "partials/results_table.html" %}
-        </div>
-
-        {% include "partials/model_metrics.html" %}
-    </main>
-
-    {% include "partials/detail_modal.html" %}
-    {% include "partials/scripts.html" %}
-</body>
-</html>
+        {% endwith %}
+    </div>
+</div>
+{% endblock %}

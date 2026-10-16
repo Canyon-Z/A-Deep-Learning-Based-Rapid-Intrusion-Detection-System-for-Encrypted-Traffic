@@ -3,6 +3,12 @@ import os
 import numpy as np
 from tqdm import tqdm
 
+# 代码审查第 23/41 条：抹头长度只在这里定义一处。
+# MAC 头固定覆盖前 12 字节；IPv4 源/目的地址占 IP 头内偏移 12~19 共 8 字节
+# （历史 docstring 写成「20 字节」，与实现不符，已按实际行为改正）。
+MAC_MASK_LEN = 12
+IP_MASK_LEN = 8
+
 
 class FeatureExtractor:
     """
@@ -15,34 +21,33 @@ class FeatureExtractor:
     3. 每个会话截取前 28 个包、每包前 28 字节，排列成 28×28 灰度图
 
     参数:
-        truncate_len:     会话字节截断长度（暂未使用）
         mask_headers:     是否用填充值覆盖 MAC/IP 头部
         mask_fill:        填充值 (0-255)，默认 0
         max_packets:      每个会话最大包数，默认 28
         bytes_per_packet: 每包最大字节数，默认 28
     """
 
-    def __init__(self, truncate_len=784, mask_headers=True, mask_fill=0, max_packets=28, bytes_per_packet=28):
-        self.truncate_len = truncate_len
+    def __init__(self, mask_headers=True, mask_fill=0, max_packets=28, bytes_per_packet=28):
         self.mask_headers = mask_headers
         self.mask_fill = mask_fill & 0xFF
         self.max_packets = max_packets
         self.bytes_per_packet = bytes_per_packet
 
     def _mask_packet_headers(self, pkt_list, offset):
-        """用填充字节替换 MAC 头部（前 12 字节）和 IP 头部（偏移 + 12 开始的 20 字节），
-        让模型不依赖 MAC/IP 地址做判断，专注于应用层特征。"""
+        """用填充字节替换 MAC 头部（前 12 字节）和 IPv4 源/目的地址
+        （IP 头内偏移 + 12 开始的 8 字节），让模型不依赖 MAC/IP 地址做判断，
+        专注于应用层特征。"""
         if not self.mask_headers:
             return pkt_list
 
         fill_byte = bytes([self.mask_fill])
 
-        mac_end = min(12, len(pkt_list))
+        mac_end = min(MAC_MASK_LEN, len(pkt_list))
         if mac_end > 0:
             pkt_list[:mac_end] = fill_byte * mac_end
 
-        ip_start = offset + 12
-        ip_end = min(offset + 20, len(pkt_list))
+        ip_start = offset + MAC_MASK_LEN
+        ip_end = min(ip_start + IP_MASK_LEN, len(pkt_list))
         if ip_start < ip_end:
             pkt_list[ip_start:ip_end] = fill_byte * (ip_end - ip_start)
 
@@ -112,10 +117,6 @@ class FeatureExtractor:
 
                         ip_hl = (pkt_data[offset] & 0x0F) * 4
                         proto = pkt_data[offset + 9]
-
-                        if offset + 20 > len(pkt_data):
-                            skip_stats["too_short"] += 1
-                            continue
 
                         src_ip = f"{pkt_data[offset+12]}.{pkt_data[offset+13]}.{pkt_data[offset+14]}.{pkt_data[offset+15]}"
                         dst_ip = f"{pkt_data[offset+16]}.{pkt_data[offset+17]}.{pkt_data[offset+18]}.{pkt_data[offset+19]}"

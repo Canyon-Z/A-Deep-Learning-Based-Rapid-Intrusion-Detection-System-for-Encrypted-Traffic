@@ -11,19 +11,9 @@ from src.preprocessing.data_loader import get_dataloaders
 from src.training.train import train_model
 from src.training.loss_utils import build_criterion, compute_class_weights
 from src.models.classic_cnn import ClassicCNN
+# 设备解析统一到 src/utils/device.py（代码审查第 40 条：原先 6 份复制实现）
+from src.utils.device import resolve_device
 
-
-def resolve_device(requested_device: str) -> torch.device:
-    requested = requested_device.lower().strip()
-    if requested == 'auto':
-        return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    if requested == 'cuda' and not torch.cuda.is_available():
-        print('警告: 当前环境没有可用 CUDA，已自动回退到 CPU。')
-        return torch.device('cpu')
-    if requested not in ('cpu', 'cuda'):
-        print(f"警告: 未知 device='{requested_device}'，已使用 auto。")
-        return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    return torch.device(requested)
 
 def main():
     parser = argparse.ArgumentParser(description="训练 Classic_CNN 模型")
@@ -36,7 +26,6 @@ def main():
     parser.add_argument('--epochs', type=int, default=10, help="训练轮数")
     parser.add_argument('--batch-size', type=int, default=32, help="批次大小")
     parser.add_argument('--lr', type=float, default=0.001, help="学习率")
-    parser.add_argument('--truncate-len', type=int, default=784, help="会话截断长度")
     parser.add_argument('--mask-headers', action='store_true', default=True, help="是否隐藏MAC/IP头部")
     parser.add_argument('--no-mask-headers', dest='mask_headers', action='store_false', help="关闭MAC/IP隐藏")
     parser.add_argument('--mask-fill', type=int, default=0, help="隐藏时使用的填充值(0-255)")
@@ -86,7 +75,6 @@ def main():
     train_loader, val_loader, test_loader, class_to_idx = get_dataloaders(
         data_root,
         batch_size=args.batch_size,
-        truncate_len=args.truncate_len,
         mask_headers=args.mask_headers,
         mask_fill=args.mask_fill,
     )
@@ -137,7 +125,6 @@ def main():
         'model': model_name,
         'epochs': args.epochs,
         'batch_size': args.batch_size,
-        'truncate_len': args.truncate_len,
         'mask_headers': args.mask_headers,
         'mask_fill': args.mask_fill,
         'learning_rate': args.lr,

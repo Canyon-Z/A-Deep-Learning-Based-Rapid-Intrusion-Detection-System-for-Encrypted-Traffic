@@ -1,14 +1,51 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap');
+/* ==========================================================================
+   DL-IDS 设计规范层
+   深色安全运营控制台：单一强调色、克制的层级、无发光装饰。
+   字体使用系统栈，不依赖外部字体 CDN。
+   ========================================================================== */
 
-body {
-    font-family: 'Inter', sans-serif;
-    background-color: #0B0F1E;
-    color: #E2E8F0;
-    overflow-x: hidden;
+:root {
+    --ds-bg: #0A0E14;
+    --ds-panel: #111721;
+    --ds-card: #151C28;
+    --ds-card-hi: #1A2230;
+    --ds-border: #222C3A;
+    --ds-border-strong: #2E3B4D;
+    --ds-accent: #22D3EE;
+    --ds-accent-soft: rgba(34, 211, 238, 0.12);
+    --ds-danger: #F43F5E;
+    --ds-success: #10B981;
+    --ds-warning: #F59E0B;
+    --ds-text: #E6EDF3;
+    --ds-text-dim: #94A3B8;
+    --ds-text-mute: #64748B;
+    --ds-radius: 10px;
+    --ds-radius-sm: 6px;
+
+    /* 动效规范：两档时长 + 单一缓动曲线。
+       fast 用于悬停、按压、颜色与边框变化；base 用于面板显隐、视图切换、数值变化。
+       任何地方都不要自造第三档时长或第二种缓动。 */
+    --mo-fast: 140ms;
+    --mo-base: 220ms;
+    --mo-slow: 420ms;
+    --mo-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-.font-mono {
-    font-family: 'JetBrains Mono', monospace;
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei",
+        "PingFang SC", "Hiragino Sans GB", "Source Han Sans SC", sans-serif;
+    background-color: var(--ds-bg);
+    color: var(--ds-text);
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* 数字与标识符统一等宽并锁定字宽，避免数值跳动 */
+body .font-mono,
+body code,
+body kbd {
+    font-family: ui-monospace, "Cascadia Mono", "Consolas", "SFMono-Regular", Menlo, monospace;
+    font-variant-numeric: tabular-nums;
 }
 
 /* Custom Scrollbar */
@@ -17,38 +54,446 @@ body {
     height: 8px;
 }
 ::-webkit-scrollbar-track {
-    background: #0B0F1E; 
+    background: var(--ds-bg);
 }
 ::-webkit-scrollbar-thumb {
-    background: #2A3447; 
+    background: var(--ds-border-strong);
     border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-    background: #00E5FF; 
+    background: #3A4A5F;
 }
 
-/* Glassmorphism Card */
-.glass-card {
-    background: rgba(21, 27, 45, 0.7);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(42, 52, 71, 0.5);
+/* ==========================================================================
+   面板：全站唯一的一级容器形态
+   ========================================================================== */
+
+.panel {
+    background: var(--ds-card);
+    border: 1px solid var(--ds-border);
+    border-radius: var(--ds-radius);
 }
-    
-/* Upload Area Scanning Effect */
-.scan-line {
-    background: linear-gradient(to bottom, transparent, #00E5FF, transparent);
-    height: 2px;
+
+.panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 13px 18px;
+    border-bottom: 1px solid var(--ds-border);
+}
+
+.panel-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--ds-text);
+}
+
+.panel-title i {
+    font-size: 12px;
+    color: var(--ds-text-mute);
+}
+
+.panel-hint {
+    font-size: 11.5px;
+    color: var(--ds-text-mute);
+}
+
+/* 兼容历史类名：modal.js:163 以 .glass-card 作为查询选择器，必须保留 */
+.glass-card {
+    background: var(--ds-card);
+    border: 1px solid var(--ds-border);
+    border-radius: var(--ds-radius);
+}
+
+/* ==========================================================================
+   KPI 带：以 1px 分隔线构成一整条，而非若干张独立卡片
+   ========================================================================== */
+
+.kpi-strip {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--ds-border);
+    border: 1px solid var(--ds-border);
+    border-radius: var(--ds-radius);
+    overflow: hidden;
+}
+
+.kpi-cell {
+    background: var(--ds-card);
+    padding: 14px 18px;
+    min-width: 0;
+}
+
+.kpi-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--ds-text-mute);
+    margin-bottom: 6px;
+}
+
+.kpi-value {
+    font-size: 22px;
+    line-height: 1.1;
+    font-weight: 600;
+    color: var(--ds-text);
+}
+
+.kpi-value.is-danger {
+    color: var(--ds-danger);
+}
+
+.kpi-value .unit {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--ds-text-mute);
+    margin-left: 2px;
+}
+
+.kpi-foot {
+    font-size: 11px;
+    color: var(--ds-text-mute);
+    margin-top: 5px;
+}
+
+@media (max-width: 900px) {
+    .kpi-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+/* ==========================================================================
+   按钮
+   ========================================================================== */
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 13px;
+    border-radius: var(--ds-radius-sm);
+    border: 1px solid transparent;
+    font-size: 12.5px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color var(--mo-fast) var(--mo-ease), border-color var(--mo-fast) var(--mo-ease), color var(--mo-fast) var(--mo-ease);
+}
+
+.btn:disabled,
+.btn[disabled] {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.btn-primary {
+    background: var(--ds-accent);
+    color: #06232A;
+    font-weight: 600;
+}
+.btn-primary:hover:not(:disabled) {
+    background: #46DDF1;
+}
+
+.btn-ghost {
+    border-color: var(--ds-border-strong);
+    color: var(--ds-text-dim);
+    background: transparent;
+}
+.btn-ghost:hover:not(:disabled) {
+    border-color: #3A4A5F;
+    color: var(--ds-text);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.btn-danger {
+    border-color: rgba(244, 63, 94, 0.4);
+    color: var(--ds-danger);
+    background: rgba(244, 63, 94, 0.08);
+}
+.btn-danger:hover:not(:disabled) {
+    background: rgba(244, 63, 94, 0.15);
+}
+
+.btn-sm {
+    height: 27px;
+    padding: 0 10px;
+    font-size: 12px;
+}
+
+/* ==========================================================================
+   分段控件（视图切换 / 过滤器）
+   ========================================================================== */
+
+.segmented {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 8px;
+    background: var(--ds-panel);
+    border: 1px solid var(--ds-border);
+}
+
+.segmented .seg-item {
+    padding: 6px 16px;
+    border-radius: var(--ds-radius-sm);
+    border: 1px solid transparent;
+    font-size: 13px;
+    color: var(--ds-text-dim);
+    background: transparent;
+    cursor: pointer;
+    transition: background-color var(--mo-fast) var(--mo-ease), color var(--mo-fast) var(--mo-ease), border-color var(--mo-fast) var(--mo-ease);
+}
+
+.segmented .seg-item:hover {
+    color: var(--ds-text);
+}
+
+.segmented .seg-item.is-active {
+    background: var(--ds-accent-soft);
+    border-color: rgba(34, 211, 238, 0.3);
+    color: var(--ds-accent);
+}
+
+.filter-chip {
+    height: 26px;
+    padding: 0 10px;
+    border-radius: var(--ds-radius-sm);
+    border: 1px solid transparent;
+    font-size: 12px;
+    color: var(--ds-text-dim);
+    background: transparent;
+    cursor: pointer;
+    transition: background-color var(--mo-fast) var(--mo-ease), color var(--mo-fast) var(--mo-ease), border-color var(--mo-fast) var(--mo-ease);
+}
+
+.filter-chip:hover {
+    color: var(--ds-text);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.filter-chip.is-active {
+    background: var(--ds-accent-soft);
+    border-color: rgba(34, 211, 238, 0.3);
+    color: var(--ds-accent);
+}
+
+/* ==========================================================================
+   模型条（主从视图的「主」）：紧凑、可扫描
+   ========================================================================== */
+
+.model-strip {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 8px;
+    padding: 14px 18px;
+}
+
+@media (max-width: 1200px) {
+    .model-strip {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 700px) {
+    .model-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.model-chip {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 11px 13px;
+    border: 1px solid var(--ds-border);
+    border-radius: 8px;
+    background: var(--ds-card);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color var(--mo-fast) var(--mo-ease), background-color var(--mo-fast) var(--mo-ease);
+}
+
+.model-chip:hover {
+    border-color: var(--ds-border-strong);
+    background: var(--ds-card-hi);
+}
+
+.model-chip.is-active {
+    border-color: rgba(34, 211, 238, 0.45);
+    background: var(--ds-accent-soft);
+}
+
+.model-chip .mc-name {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ds-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.model-chip .mc-acc {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--ds-text);
+}
+
+.model-chip .mc-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 10.5px;
+    color: var(--ds-text-mute);
+}
+
+.model-chip .mc-state {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--ds-text-mute);
+}
+
+.model-chip.is-active .mc-state {
+    background: rgba(34, 211, 238, 0.18);
+    color: var(--ds-accent);
+}
+
+/* 指标格子 */
+.metric-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--ds-border);
+    border: 1px solid var(--ds-border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.metric-cell {
+    background: var(--ds-card);
+    padding: 10px 12px;
+}
+
+.metric-cell .mlabel {
+    font-size: 10.5px;
+    color: var(--ds-text-mute);
+    margin-bottom: 4px;
+}
+
+.metric-cell .mvalue {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ds-text);
+}
+
+@media (max-width: 900px) {
+    .metric-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+.value-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px 18px;
+}
+
+.value-item .vlabel {
+    font-size: 10.5px;
+    color: var(--ds-text-mute);
+    margin-bottom: 3px;
+}
+
+.value-item .vvalue {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--ds-text-dim);
+}
+
+/* ==========================================================================
+   表格
+   ========================================================================== */
+
+.data-table {
     width: 100%;
+    border-collapse: collapse;
+}
+
+.data-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--ds-panel);
+    padding: 9px 18px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--ds-text-mute);
+    text-align: left;
+    border-bottom: 1px solid var(--ds-border);
+    white-space: nowrap;
+}
+
+.data-table tbody td {
+    padding: 11px 18px;
+    font-size: 12.5px;
+    border-bottom: 1px solid rgba(34, 44, 58, 0.55);
+}
+
+.data-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+/* ==========================================================================
+   上传区
+   ========================================================================== */
+
+#dropZone {
+    position: relative;
+    overflow: hidden;
+    transition: border-color var(--mo-base) var(--mo-ease), background-color var(--mo-base) var(--mo-ease);
+}
+
+#dropZone:hover {
+    border-color: rgba(34, 211, 238, 0.4);
+}
+
+#dropZone.is-dragover {
+    border-color: var(--ds-accent);
+    background: var(--ds-accent-soft);
+}
+
+/* 上传中：顶部细条呼吸。
+   旧版是一条来回滑动的扫描线，滑动的起点与终点非常跳，改为只做透明度呼吸。 */
+.scan-line {
     position: absolute;
     top: 0;
     left: 0;
-    box-shadow: 0 0 10px #00E5FF;
-    animation: scan 2s linear infinite;
-    display: none; 
+    height: 2px;
+    width: 100%;
+    background: var(--ds-accent);
+    opacity: 0;
+    transition: opacity var(--mo-fast) var(--mo-ease);
 }
+
 .scanning .scan-line {
-    display: block;
+    animation: scanBreath 1.8s var(--mo-ease) infinite;
+}
+
+@keyframes scanBreath {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 0.9; }
 }
 
 .pixelated-image {
@@ -60,16 +505,97 @@ body {
 }
 
 .iface-select {
-    background-color: #0B0F1E;
-    color: #fff;
+    background-color: var(--ds-bg);
+    color: var(--ds-text);
     -webkit-appearance: none;
     -moz-appearance: none;
     appearance: none;
-    border: 1px solid #2A3447;
+    border: 1px solid var(--ds-border);
+    border-radius: var(--ds-radius-sm);
 }
 
+#selectedDisplay.iface-select {
+    height: 34px;
+    padding: 0 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color var(--mo-fast) var(--mo-ease);
+}
+
+#selectedDisplay.iface-select:hover {
+    border-color: var(--ds-border-strong);
+}
+
+/* KPI 带内的模型下拉 */
+.select-field {
+    height: 30px;
+    width: 100%;
+    padding: 0 26px 0 10px;
+    font-size: 13px;
+    color: var(--ds-text);
+    background-color: var(--ds-bg);
+    border: 1px solid var(--ds-border-strong);
+    border-radius: var(--ds-radius-sm);
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='%2394A3B8' d='M6 8.5 1.5 4h9z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 9px center;
+    background-size: 10px;
+    cursor: pointer;
+    transition: border-color var(--mo-fast) var(--mo-ease);
+}
+
+.select-field:focus {
+    outline: none;
+    border-color: var(--ds-accent);
+}
+
+.select-field:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* JS 以 bg-cyber-primary 切换激活态，此处统一为强调色 */
+.segmented .seg-item.bg-cyber-primary {
+    background: var(--ds-accent);
+    color: #07121A;
+    font-weight: 600;
+}
+
+.filter-chip.bg-cyber-primary {
+    background: var(--ds-accent);
+    border-color: var(--ds-accent);
+    color: #07121A;
+}
+
+/* 模型详情内的图表容器 */
+.chart-box {
+    background: var(--ds-card);
+    border: 1px solid var(--ds-border);
+    border-radius: 8px;
+    padding: 10px 12px 4px;
+}
+
+.chart-title {
+    font-size: 11px;
+    color: var(--ds-text-mute);
+    margin-bottom: 4px;
+}
+
+/* ==========================================================================
+   实时抓包页：拓扑图与流程动画按原样保留，仅统一配色
+   ========================================================================== */
+
 .live-flow-graph-wrap {
-    background: linear-gradient(135deg, rgba(3,10,25,0.6), rgba(8,14,30,0.85));
+    background: var(--ds-bg);
+    border: 1px solid var(--ds-border);
+    border-radius: var(--ds-radius);
     position: relative;
     overflow: hidden;
 }
@@ -84,23 +610,24 @@ body {
 }
 
 .live-flow-tool-btn {
-    width: 30px;
+    min-width: 30px;
     height: 30px;
+    padding: 0 9px;
+    white-space: nowrap;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     border-radius: 9999px;
-    border: 1px solid rgba(42,52,71,0.9);
-    background: rgba(11,15,30,0.88);
-    color: #E2E8F0;
-    box-shadow: 0 0 12px rgba(0,229,255,0.08);
-    transition: transform 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    border: 1px solid var(--ds-border-strong);
+    background: rgba(17, 23, 33, 0.9);
+    color: var(--ds-text-dim);
+    transition: transform var(--mo-fast) var(--mo-ease), border-color var(--mo-fast) var(--mo-ease), color var(--mo-fast) var(--mo-ease);
 }
 
 .live-flow-tool-btn:hover {
     transform: translateY(-1px);
-    border-color: rgba(0,229,255,0.65);
-    color: #00E5FF;
+    border-color: rgba(34, 211, 238, 0.6);
+    color: var(--ds-accent);
 }
 
 .live-flow-tooltip {
@@ -108,11 +635,11 @@ body {
     pointer-events: none;
     z-index: 12;
     max-width: 280px;
-    background: rgba(8, 14, 30, 0.95);
-    border: 1px solid rgba(0,229,255,0.22);
-    box-shadow: 0 10px 30px rgba(0,0,0,0.35);
-    color: #E2E8F0;
-    border-radius: 12px;
+    background: rgba(17, 23, 33, 0.97);
+    border: 1px solid var(--ds-border-strong);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    color: var(--ds-text);
+    border-radius: var(--ds-radius);
     padding: 10px 12px;
     font-size: 12px;
     line-height: 1.35;
@@ -122,71 +649,530 @@ body {
     display: none;
 }
 
-.live-flow-path {
-    fill: none;
-    stroke-dasharray: 10 14;
-    animation: liveFlowDash 8s linear infinite;
+/* 旧 SVG 版实时拓扑的样式（.live-flow-path / .live-flow-node-core / .live-node-group）
+   与 liveFlowDash、liveNodePulse 关键帧已随 canvas 版重写一并删除：
+   它们既是死代码，也是"整屏都在动"的噪声来源。 */
+
+/* ==========================================================================
+   动效规范（Motion Spec）
+   两档时长（--mo-fast / --mo-base / --mo-slow）、单一缓动（--mo-ease）。
+   约定：一屏之内同时最多一个进行中的动画；入场只淡入，不做位移；
+   循环动画只允许出现在"正在进行的任务"上（上传解析、实时抓包运行）。
+   ========================================================================== */
+
+.mo-in {
+    animation: moFadeIn var(--mo-base) var(--mo-ease) both;
 }
 
-.live-flow-path.hit-area {
-    stroke: rgba(0,0,0,0);
-    stroke-dasharray: none;
-    animation: none;
+@keyframes moFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
 }
 
-.live-flow-path.hovered {
-    filter: url(#glow);
+/* 新数据到达：单次高亮淡出，不改变布局、不推动其他元素 */
+.mo-row-new {
+    animation: moRowIn var(--mo-slow) var(--mo-ease) both;
+}
+
+@keyframes moRowIn {
+    from { background-color: rgba(34, 211, 238, 0.16); }
+    to { background-color: transparent; }
+}
+
+/* 恶意告警：单次扩散环（不是无限脉冲），一次就够 */
+.mo-alert-once {
+    animation: moAlertOnce 620ms var(--mo-ease) both;
+}
+
+@keyframes moAlertOnce {
+    0% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.45); }
+    100% { box-shadow: 0 0 0 16px rgba(244, 63, 94, 0); }
+}
+
+/* 数值变化：单次着色后回到常态 */
+.mo-flash {
+    animation: moFlash var(--mo-slow) var(--mo-ease) both;
+}
+
+@keyframes moFlash {
+    from { color: var(--ds-accent); }
+    to { color: inherit; }
+}
+
+/* 尊重系统的"减少动态效果"设置 */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* ==========================================================================
+   应用外壳：左侧导航 + 顶栏 + 内容区
+   5 个页面共用同一套外壳，页面之间只有内容区不同。
+   这里用原生 CSS 而不是 Tailwind：tailwind.css 是构建期预编译产物，
+   模板里新写的类名不会自动生成，外壳一旦漏编译就会整块塌掉。
+   ========================================================================== */
+
+.app-shell {
+    min-height: 100vh;
+}
+
+/* ---------- 左侧导航 ---------- */
+
+.app-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 232px;
+    display: flex;
+    flex-direction: column;
+    background: var(--ds-panel);
+    border-right: 1px solid var(--ds-border);
+    z-index: 40;
+    transition: width var(--mo-base) var(--mo-ease);
+}
+
+.app-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 18px 16px;
+    border-bottom: 1px solid var(--ds-border);
+}
+
+/* 这个图标同时是「收起 / 展开侧栏」的开关（模板里它是 <button>），所以按按钮重置一遍默认样式。 */
+.app-brand-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    flex: none;
+    padding: 0;
+    border: 0;
+    border-radius: var(--ds-radius-sm);
+    background: var(--ds-accent-soft);
+    color: var(--ds-accent);
+    font: inherit;
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    transition: box-shadow var(--mo-fast) var(--mo-ease);
+}
+
+.app-brand-icon:hover {
+    box-shadow: 0 0 0 3px var(--ds-accent-soft);
+}
+
+.app-brand-icon:focus-visible {
+    outline: 2px solid var(--ds-accent);
+    outline-offset: 2px;
+}
+
+.app-brand-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.app-brand-name {
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--ds-text);
+    white-space: nowrap;
+}
+
+.app-brand-code {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: var(--ds-text-mute);
+}
+
+.app-nav {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 14px 12px;
+    overflow-y: auto;
+}
+
+.app-nav-group {
+    padding: 4px 10px 8px;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    color: var(--ds-text-mute);
+    text-transform: uppercase;
+}
+
+.app-nav-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 38px;
+    padding: 0 12px;
+    border-radius: var(--ds-radius-sm);
+    font-size: 13px;
+    color: var(--ds-text-dim);
+    text-decoration: none;
+    transition: background var(--mo-fast) var(--mo-ease),
+        color var(--mo-fast) var(--mo-ease);
+}
+
+.app-nav-item i {
+    width: 16px;
+    flex: none;
+    text-align: center;
+    font-size: 12px;
+}
+
+.app-nav-item:hover {
+    background: var(--ds-card-hi);
+    color: var(--ds-text);
+}
+
+.app-nav-item.is-active {
+    background: var(--ds-accent-soft);
+    color: var(--ds-accent);
+    font-weight: 600;
+}
+
+.app-nav-item.is-active::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 9px;
+    bottom: 9px;
+    width: 2px;
+    border-radius: 0 2px 2px 0;
+    background: var(--ds-accent);
+}
+
+.app-side-foot {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    border-top: 1px solid var(--ds-border);
+}
+
+.app-side-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    min-height: 18px;
+    font-size: 11px;
+    color: var(--ds-text-dim);
+}
+
+.app-side-status .status-dot {
+    width: 6px;
+    height: 6px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--ds-warning);
+}
+
+/* ---------- 侧栏收起（图标轨道） ----------
+   收起状态挂在 <html> 上（不是 .app-sidebar 上）：这个类由 head 里的内联脚本在首次绘制前
+   就写好，避免整页先按 232px 画一遍、再跳回收起的宽度。开关就是 .app-brand-icon 本身。 */
+
+html.is-rail .app-sidebar {
+    width: 64px;
+}
+
+html.is-rail .app-main {
+    margin-left: 64px;
+}
+
+html.is-rail .app-brand {
+    justify-content: center;
+    padding: 18px 0;
+}
+
+html.is-rail .app-brand-text,
+html.is-rail .app-nav-group,
+html.is-rail .app-nav-item span,
+html.is-rail .app-side-status #systemStatusText {
+    display: none;
+}
+
+html.is-rail .app-nav {
+    padding: 14px 10px;
+}
+
+html.is-rail .app-nav-item {
+    justify-content: center;
+    padding: 0;
+}
+
+html.is-rail .app-side-foot {
+    padding: 12px 10px;
+}
+
+html.is-rail .app-side-status {
+    justify-content: center;
+    padding: 0;
+}
+
+/* 收起时「退出登录」只剩图标：.app-side-foot 的 10px 内边距 + 40px 按钮刚好塞进 64px */
+html.is-rail .app-side-foot .btn {
+    justify-content: center;
+    width: 100%;
+    padding: 0;
+}
+
+html.is-rail .app-side-foot .btn span {
+    display: none;
+}
+
+html.is-rail .app-side-foot .btn i {
+    margin-right: 0;
+}
+
+/* ---------- 顶栏 ---------- */
+
+.app-main {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    margin-left: 232px;
+    transition: margin-left var(--mo-base) var(--mo-ease);
+}
+
+.app-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    height: 64px;
+    padding: 0 24px;
+    background: rgba(10, 14, 20, 0.9);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--ds-border);
+}
+
+.app-page-title {
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.25;
+    color: var(--ds-text);
+}
+
+.app-page-sub {
+    margin-top: 1px;
+    font-size: 11.5px;
+    color: var(--ds-text-mute);
+}
+
+.app-capture {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.app-capture-state {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+    font-size: 11.5px;
+    color: var(--ds-text-mute);
+}
+
+.app-capture-state .status-dot {
+    width: 6px;
+    height: 6px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--ds-text-mute);
+    transition: background var(--mo-base) var(--mo-ease);
+}
+
+.app-capture-state.is-running {
+    color: var(--ds-success);
+}
+
+.app-capture-state.is-running .status-dot {
+    background: var(--ds-success);
+}
+
+/* ---------- 内容区与页面栅格 ---------- */
+
+.app-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    width: 100%;
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 22px 24px 32px;
+}
+
+.grid-12 {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 20px;
+    align-items: start;
+}
+
+.col-4 { grid-column: span 4; }
+.col-6 { grid-column: span 6; }
+.col-8 { grid-column: span 8; }
+.col-12 { grid-column: span 12; }
+
+.stack {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* 记录来源标记（检测记录页把上传与实时两路合到一张表里） */
+.src-badge {
+    display: inline-flex;
+    align-items: center;
+    height: 18px;
+    padding: 0 7px;
+    border-radius: 9999px;
+    font-size: 10.5px;
+    letter-spacing: 0.02em;
+    border: 1px solid var(--ds-border-strong);
+    color: var(--ds-text-dim);
+}
+
+.src-badge.is-live {
+    border-color: rgba(34, 211, 238, 0.35);
+    color: var(--ds-accent);
+}
+
+@media (max-width: 1180px) {
+    .col-4,
+    .col-6,
+    .col-8 {
+        grid-column: span 12;
+    }
+}
+
+@media (max-width: 900px) {
+    /* 窄屏直接锁定成图标轨道，不再给展开的机会；开关（品牌图标）留着但不能点，免得点了没反应 */
+    .app-sidebar {
+        width: 64px;
+    }
+
+    .app-brand-icon {
+        pointer-events: none;
+        cursor: default;
+    }
+
+    .app-brand {
+        justify-content: center;
+        padding: 18px 0;
+    }
+
+    .app-brand-text,
+    .app-nav-group,
+    .app-nav-item span,
+    .app-side-status #systemStatusText {
+        display: none;
+    }
+
+    .app-nav {
+        padding: 14px 10px;
+    }
+
+    .app-nav-item {
+        justify-content: center;
+        padding: 0;
+    }
+
+    .app-side-foot {
+        padding: 12px 10px;
+    }
+
+    .app-side-status {
+        justify-content: center;
+        padding: 0;
+    }
+
+    .app-side-foot .btn {
+        justify-content: center;
+        width: 100%;
+        padding: 0;
+    }
+
+    .app-side-foot .btn span {
+        display: none;
+    }
+
+    .app-side-foot .btn i {
+        margin-right: 0;
+    }
+
+    .app-main {
+        margin-left: 64px;
+    }
+
+    .app-content {
+        padding: 16px;
+    }
+}
+
+/* ==========================================================================
+   无刷新换页（router_impl.js）
+   只有「已经在站内、点导航」才走这条路；直接输网址与刷新仍是完整加载。
+   换页本身通常只有几毫秒（导航项悬停时已经预取过），所以进度条延迟出现：
+   快的时候一点痕迹都不该有，慢的时候才需要让用户知道在动。
+   ========================================================================== */
+.route-progress {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    z-index: 300;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity var(--mo-fast) linear;
+}
+
+.route-progress::after {
+    content: '';
+    display: block;
+    height: 100%;
+    background: var(--ds-accent);
+    box-shadow: 0 0 8px var(--ds-accent-soft);
+    transform: scaleX(0);
+    transform-origin: left center;
+    transition: transform var(--mo-slow) var(--mo-ease);
+}
+
+.route-progress.is-on {
     opacity: 1;
 }
 
-.live-flow-link.hovered .live-flow-path:not(.hit-area) {
-    filter: url(#glow);
-    opacity: 1;
+.route-progress.is-on::after {
+    transform: scaleX(0.75);
 }
 
-.live-node-group.hovered .live-flow-node-core {
-    stroke: rgba(255,255,255,0.9);
-    stroke-width: 1.6;
-    filter: url(#glow);
+/* 收尾：先把进度条推满，再整体淡出 */
+.route-progress.is-done {
+    opacity: 0;
 }
 
-.live-node-group.hovered text {
-    font-weight: 700;
-}
-
-.live-flow-path {
-    pointer-events: stroke;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-}
-
-.live-flow-node-core {
-    animation: liveNodePulse 2.8s ease-in-out infinite;
-}
-
-@keyframes liveFlowDash {
-    to { stroke-dashoffset: -240; }
-}
-
-@keyframes liveNodePulse {
-    0%, 100% { transform: scale(1); opacity: 0.9; }
-    50% { transform: scale(1.07); opacity: 1; }
-}
-
-@keyframes pageSlideFromLeft {
-    0% { transform: translateX(18px); opacity: 0.96; }
-    100% { transform: translateX(0); opacity: 1; }
-}
-
-@keyframes pageSlideFromRight {
-    0% { transform: translateX(-18px); opacity: 0.96; }
-    100% { transform: translateX(0); opacity: 1; }
-}
-
-.page-slide-enter-left {
-    animation: pageSlideFromLeft 320ms ease;
-}
-
-.page-slide-enter-right {
-    animation: pageSlideFromRight 320ms ease;
+.route-progress.is-done::after {
+    transform: scaleX(1);
+    transition: transform var(--mo-fast) linear;
 }

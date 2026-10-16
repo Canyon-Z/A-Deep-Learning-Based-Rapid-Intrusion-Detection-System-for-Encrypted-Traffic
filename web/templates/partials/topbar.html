@@ -1,0 +1,18 @@
+<!-- 顶栏：页面标题 + 常驻抓包控制。抓包状态不隶属于任何一个页面，任意页面都能开始/停止。 -->
+<header class="app-topbar">
+    <div>
+        <div class="app-page-title">{{ page_title }}</div>
+        <div class="app-page-sub">{{ page_subtitle }}</div>
+    </div>
+
+    <div class="app-capture">
+        <div id="captureState" class="app-capture-state">
+            <span class="status-dot"></span>
+            <span id="captureText">未抓包</span>
+        </div>
+        <button id="liveToggleBtn" class="btn btn-sm btn-primary" data-running="false"
+                title="开始或停止实时抓包">
+            <i id="liveToggleIcon" class="fa-solid fa-play mr-1.5"></i><span id="liveToggleLabel">开始抓包</span>
+        </button>
+    </div>
+</header>

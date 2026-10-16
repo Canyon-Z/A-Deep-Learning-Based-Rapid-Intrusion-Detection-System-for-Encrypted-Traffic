@@ -3,7 +3,90 @@
 (function() {
     'use strict';
 
+    // ---------- 图表动效规范 ----------
+    // ECharts 默认入场动画 1000ms：趋势图每 1.5s 轮询刷新一次，数据一更新整张图就重新
+    // "长"一遍，看起来像在抽搐。这里统一压到 220ms（与 CSS 的 --mo-base 同档），
+    // 缓动固定 cubicOut，并让所有 echarts.init 显式带上这个主题。
+    try {
+        if (window.echarts && typeof window.echarts.registerTheme === 'function') {
+            window.DLIDS_CHART_THEME = 'dlids';
+            window.echarts.registerTheme('dlids', {
+                animationDuration: 220,
+                animationEasing: 'cubicOut',
+                animationDurationUpdate: 220,
+                animationEasingUpdate: 'cubicOut'
+            });
+        }
+    } catch (e) { console.warn('registerTheme failed', e); }
+
+    // KPI 数字变化时做一次短促高亮（styles.css 的 .mo-flash）；值没变就不动，
+    // 避免轮询每秒把同一个数字闪一遍。
+    window.dlidsFlash = function (el) {
+        if (!el) return;
+        el.classList.remove('mo-flash');
+        void el.offsetWidth; // 强制重排，让同一个动画可以被连续触发
+        el.classList.add('mo-flash');
+        setTimeout(function () { el.classList.remove('mo-flash'); }, 460);
+    };
+    window.dlidsSetKpi = function (el, value) {
+        if (!el) return;
+        const next = String(value === null || value === undefined ? 0 : value);
+        if (el.innerText === next) return;
+        el.innerText = next;
+        window.dlidsFlash(el);
+    };
+
+    // ---------- 全站统一统计口径 ----------
+    // 为什么需要这一层：KPI 带与「威胁类型分布」原先各自记账——上传流程写 window.totalScans，
+    // 实时轮询又直接把 KPI 改成"抓包累计包数"，于是同一屏里两个数字口径不同、切页面就变。
+    // 现在只有一份数据、只有一个渲染函数；任何地方都不许再直接写 statTotal/statMalware/#pieChart。
+    window.dlidsStats = window.dlidsStats || {
+        upload: { total: 0, malware: 0 },   // 上传检测：按文件计
+        live: { sessions: 0, malware: 0 }   // 实时抓包：按会话计（后端给的是累计值，取最大值保证单调）
+    };
+
+    window.dlidsStatsSnapshot = function () {
+        const s = window.dlidsStats || {};
+        const upload = s.upload || { total: 0, malware: 0 };
+        const live = s.live || { sessions: 0, malware: 0 };
+        const total = (Number(upload.total) || 0) + (Number(live.sessions) || 0);
+        let malware = (Number(upload.malware) || 0) + (Number(live.malware) || 0);
+        if (malware > total) malware = total;
+        return { total: total, malware: malware, benign: Math.max(0, total - malware) };
+    };
+
+    // 唯一允许写 KPI 与威胁分布饼图的地方
+    window.dlidsRenderStats = function () {
+        const snap = window.dlidsStatsSnapshot();
+        // 兼容既有读取方（详情弹窗、模型评估等处仍在读这两个全局）
+        window.totalScans = snap.total;
+        window.malwareCount = snap.malware;
+        try { if (window.dlidsSetKpi) window.dlidsSetKpi(document.getElementById('statTotal'), snap.total); } catch (e) {}
+        try { if (window.dlidsSetKpi) window.dlidsSetKpi(document.getElementById('statMalware'), snap.malware); } catch (e) {}
+        // 饼图实例可能登记在 charts_impl（window.pieChart）或 upload_trend_impl（window.uploadPieChart）名下，
+        // 谁先 init 成功就是谁；这里两个都认，否则会出现「KPI 有数字、饼图整块空白」。
+        const pie = window.pieChart || window.uploadPieChart;
+        if (pie && typeof pie.setOption === 'function') {
+            try {
+                const pieTotal = snap.total;
+                pie.setOption({
+                    title: { show: pieTotal <= 0, text: '暂无数据', left: 'center', top: 'middle', textStyle: { color: '#64748B', fontSize: 12, fontWeight: 'normal' } },
+                    legend: { show: pieTotal > 0 },
+                    series: [{
+                        data: pieTotal > 0 ? [
+                            { value: snap.benign, name: 'Normal', itemStyle: { color: '#10B981' } },
+                            { value: snap.malware, name: 'Malware', itemStyle: { color: '#F43F5E' } }
+                        ] : []
+                    }]
+                });
+            } catch (e) { console.warn('dlidsRenderStats pie failed', e); }
+        }
+        return snap;
+    };
+
     const UI_STATE_KEY = 'dlids_ui_state';
+    // 实时抓包轮询间隔（毫秒）。pollLive 已改为按 since_id 增量拉取，这里只负责节奏。
+    const LIVE_POLL_INTERVAL_MS = 1500;
 
     function loadUiState() {
         try {
@@ -64,68 +147,23 @@
     }
     window.persistedVotingModeEnabled = !!(savedUiState && savedUiState.votingModeEnabled);
     window.recordStores = window.recordStores || { live: [], upload: [] };
-    const savedTabMode = savedUiState && (savedUiState.tabMode === 'live' || savedUiState.tabMode === 'upload') ? savedUiState.tabMode : null;
-    window.recordTableMode = savedTabMode || window.recordTableMode || 'upload';
+    // 页面模式由当前页面模板上的 data-mode 决定（upload / live / all）。
+    // 不再从 localStorage 的 tabMode 推断：页面之间是整页跳转，模式不该被上一次浏览的页面带过来。
+    function resolvePageMode() {
+        const panel = document.getElementById('resultCardPanel');
+        const mode = panel && panel.dataset ? String(panel.dataset.mode || '') : '';
+        return (mode === 'live' || mode === 'upload' || mode === 'all') ? mode : 'upload';
+    }
+    // 无刷新换页后内容区是新的 DOM，data-mode 可能变了，必须重算一次
+    window.dlidsResolvePageMode = resolvePageMode;
+    window.recordTableMode = resolvePageMode();
 
-    // Apply initial tab highlight immediately to avoid a flash where neither tab is active after reload.
-    try {
-        const earlyTabLive = findButtonByText('实时抓包') || document.getElementById('tabLive');
-        const earlyTabUpload = findButtonByText('上传检测') || document.getElementById('tabUpload');
-        if (earlyTabLive && earlyTabUpload) {
-            if (window.recordTableMode === 'live') {
-                earlyTabLive.classList.add('bg-cyber-primary', 'text-black');
-                earlyTabLive.classList.remove('text-gray-300');
-                earlyTabUpload.classList.remove('bg-cyber-primary', 'text-black');
-                earlyTabUpload.classList.add('text-gray-300');
-            } else {
-                earlyTabUpload.classList.add('bg-cyber-primary', 'text-black');
-                earlyTabUpload.classList.remove('text-gray-300');
-                earlyTabLive.classList.remove('bg-cyber-primary', 'text-black');
-                earlyTabLive.classList.add('text-gray-300');
-            }
-        }
-    } catch (e) { /* non-fatal */ }
     const savedFilter = savedUiState && ['all', 'benign', 'malware'].includes(String(savedUiState.currentFilter || '').toLowerCase())
         ? String(savedUiState.currentFilter).toLowerCase()
         : 'all';
     window.currentRecordFilter = savedFilter;
     window._liveSeen = window._liveSeen || new Set();
     window.__detailsDataMap = window.__detailsDataMap || {};
-
-    function applyInitialViewMode(mode) {
-        try {
-            const liveMode = mode === 'live';
-            const dropZoneEl = document.getElementById('dropZone');
-            const uploadContentEl = document.getElementById('uploadContent');
-            const loadingStateEl = document.getElementById('loadingState');
-            const liveSection = document.getElementById('liveSection');
-            const tabLive = findButtonByText('实时抓包') || document.getElementById('tabLive');
-            const tabUpload = findButtonByText('上传检测') || document.getElementById('tabUpload');
-
-            if (dropZoneEl) dropZoneEl.classList.toggle('hidden', liveMode);
-            if (uploadContentEl) uploadContentEl.classList.toggle('hidden', liveMode);
-            if (loadingStateEl) loadingStateEl.classList.add('hidden');
-            if (liveSection) liveSection.classList.toggle('hidden', !liveMode);
-
-            if (tabLive && tabUpload) {
-                if (liveMode) {
-                    tabLive.classList.add('bg-cyber-primary', 'text-black');
-                    tabLive.classList.remove('text-gray-300');
-                    tabUpload.classList.remove('bg-cyber-primary', 'text-black');
-                    tabUpload.classList.add('text-gray-300');
-                } else {
-                    tabUpload.classList.add('bg-cyber-primary', 'text-black');
-                    tabUpload.classList.remove('text-gray-300');
-                    tabLive.classList.remove('bg-cyber-primary', 'text-black');
-                    tabLive.classList.add('text-gray-300');
-                }
-            }
-        } catch (e) {
-            console.warn('applyInitialViewMode failed', e);
-        }
-    }
-
-    applyInitialViewMode(window.recordTableMode);
 
     // ==================== 委托函数 ====================
     function delegate(name, fn) {
@@ -180,8 +218,8 @@
     window.getModelDisplayName = delegate('uploadImpl', 'getModelDisplayName');
 
     window.startLive = delegate('liveImpl', 'startLive');
-    window.switchToLive = delegate('liveImpl', 'switchToLive');
-    window.switchToUpload = delegate('liveImpl', 'switchToUpload');
+    window.stopLive = delegate('liveImpl', 'stopLive');
+    window.toggleLiveCapture = delegate('liveImpl', 'toggleLiveCapture');
     window.setLiveRunningUI = delegate('liveImpl', 'setLiveRunningUI');
     window.pollLive = delegate('liveImpl', 'pollLive');
     window.clearLiveResultTable = delegate('liveImpl', 'clearLiveResultTable');
@@ -263,8 +301,7 @@
             indicator.style.left = '0';
             indicator.style.width = '0px';
             indicator.style.borderRadius = '9999px';
-            indicator.style.background = 'rgb(0 229 255)';
-            indicator.style.boxShadow = '0 0 12px rgba(0,229,255,0.35)';
+            indicator.style.background = 'rgb(34 211 238)';
             indicator.style.transition = 'transform 220ms ease, width 220ms ease, opacity 180ms ease';
             indicator.style.willChange = 'transform, width';
             indicator.style.zIndex = '0';
@@ -284,9 +321,19 @@
         };
 
         try { window.updateRecordFilterIndicator(window.currentRecordFilter || 'all'); } catch (e) {}
-        window.addEventListener('resize', () => {
-            try { window.updateRecordFilterIndicator(window.currentRecordFilter || 'all'); } catch (e) {}
-        });
+        // resize 监听只能挂一次：这个函数在无刷新换页后每页都会重新跑一遍，写在函数体里会让
+        // 换页次数等于监听器个数。回调每次都重新查 window.updateRecordFilterIndicator，
+        // 所以换页后它自动指向新页面的滑块。
+        if (!window.__recordFilterResizeBound) {
+            window.__recordFilterResizeBound = true;
+            window.addEventListener('resize', () => {
+                // 代码审查第 49 条：拖拽窗口会连续触发 resize，用 rAF 把同一帧内的多次回调合并成一次
+                if (window.__recordFilterResizeRaf) cancelAnimationFrame(window.__recordFilterResizeRaf);
+                window.__recordFilterResizeRaf = requestAnimationFrame(() => {
+                    try { window.updateRecordFilterIndicator(window.currentRecordFilter || 'all'); } catch (e) {}
+                });
+            });
+        }
     }
 
     // ==================== 网卡加载 ====================
@@ -363,9 +410,11 @@
     // ==================== 模型指标加载 ====================
     async function loadModelMetrics() {
         try {
-            const r = await fetch('/static/checkpoints/model_metrics.json');
+            // 代码审查疑点 3：走 /api/metrics（唯一数据源），响应形如 {status, data}
+            const r = await fetch('/api/metrics');
             if (!r.ok) return;
-            const body = await r.json();
+            const payload = await r.json();
+            const body = (payload && payload.data) ? payload.data : payload;
             const map = {
                 'CNN_BiLSTM': 'm1',
                 'Classic_CNN': 'm2',
@@ -419,10 +468,7 @@
         const elements = {
             fileInput: document.getElementById('fileInput'),
             chooseFileBtn: document.getElementById('chooseFileBtn'),
-            startLiveBtn: document.getElementById('startLiveBtn'),
-            stopLiveBtn: document.getElementById('stopLiveBtn'),
-            tabLive: findButtonByText('实时抓包') || document.getElementById('tabLive'),
-            tabUpload: findButtonByText('上传检测') || document.getElementById('tabUpload'),
+            liveToggleBtn: document.getElementById('liveToggleBtn'),
             selectedDisplay: document.getElementById('selectedDisplay'),
             dropdownMenu: document.getElementById('dropdownMenu'),
             refreshIfaces: document.getElementById('refreshIfaces'),
@@ -437,16 +483,9 @@
         if (elements.chooseFileBtn) {
             elements.chooseFileBtn.onclick = () => document.getElementById('fileInput')?.click();
         }
-        if (elements.startLiveBtn) {
-            elements.startLiveBtn.onclick = () => window.startLive?.();
+        if (elements.liveToggleBtn) {
+            elements.liveToggleBtn.onclick = () => window.toggleLiveCapture?.();
         }
-        if (elements.stopLiveBtn) {
-            elements.stopLiveBtn.onclick = () => {
-                fetch('/api/live/stop', { method: 'POST' }).then(() => window.setLiveRunningUI?.(false));
-            };
-        }
-        if (elements.tabLive) elements.tabLive.onclick = () => window.switchToLive?.();
-        if (elements.tabUpload) elements.tabUpload.onclick = () => window.switchToUpload?.();
         
         if (elements.selectedDisplay && elements.dropdownMenu) {
             elements.selectedDisplay.onclick = () => {
@@ -479,7 +518,7 @@
     }
 
     // ==================== 模块加载器 ====================
-    const assetVersion = '20260522a';
+    const assetVersion = '20260604c';
     const modulePaths = [
         '/static/js/core/state.js?v=' + assetVersion,
         '/static/js/core/utils.js?v=' + assetVersion,
@@ -491,7 +530,8 @@
         '/static/js/modules/live_trend_impl.js?v=' + assetVersion,
         '/static/js/modules/modelEval_impl.js?v=' + assetVersion,
         '/static/js/modules/results_impl.js?v=' + assetVersion,
-        '/static/js/modules/live_impl.js?v=' + assetVersion
+        '/static/js/modules/live_impl.js?v=' + assetVersion,
+        '/static/js/modules/router_impl.js?v=' + assetVersion
     ];
 
     function loadScript(src) {
@@ -508,23 +548,24 @@
         });
     }
 
-    async function init() {
-        // 加载核心模块
-        for (const path of modulePaths) {
-            try {
-                await loadScript(path);
-                console.log(`✅ Loaded: ${path.split('/').pop()}`);
-            } catch (e) {
-                console.error(`❌ Failed: ${path}`, e);
-            }
-        }
-        
-        // 绑定事件
+    /* ==================== 每页初始化 / 拆卸 ====================
+       这两个函数是无刷新换页的接口：router_impl 在替换内容区之前调 teardownPage()，
+       替换完成后调 initPage()。首屏也走同一套路径，所以「整页加载」和「站内换页」
+       之后的状态是一致的，不存在两套逻辑。 */
+    function initPage() {
+        // 页面模式由当前页面的 data-mode 决定，换页后必须重算（上传页 / 实时页 / 合并页）
+        window.recordTableMode = resolvePageMode();
+
         bindEventHandlers();
-        // 绑定结果表详情委托（由 results_impl 提供）
+        // 绑定结果表详情委托（由 results_impl 提供；内部按 tbody 上的标记做了幂等）
         try { window.resultsImpl && typeof window.resultsImpl.bindDetailButtonEvents === 'function' && window.resultsImpl.bindDetailButtonEvents(); } catch(e) { console.warn('bindDetailButtonEvents failed', e); }
-        
-        // 初始化
+        // 清除按钮：同样幂等，换页后要绑到新的那颗按钮上
+        try { window.resultsImpl && typeof window.resultsImpl.bindClearButtons === 'function' && window.resultsImpl.bindClearButtons(); } catch(e) { console.warn('bindClearButtons failed', e); }
+        // 这个模块的初始化挂在 DOMContentLoaded 上，换页不会再触发，必须手动补一次
+        try { window.uploadImpl && typeof window.uploadImpl.initVotingModeControls === 'function' && window.uploadImpl.initVotingModeControls(); } catch(e) { console.warn('initVotingModeControls failed', e); }
+        // 主机辐射图：只有实时页有 #liveFlowGraph，其它页面它会立刻返回
+        try { window.liveGraph && typeof window.liveGraph.init === 'function' && window.liveGraph.init(); } catch(e) { console.warn('liveGraph.init failed', e); }
+
         setTimeout(() => {
             loadInterfaces();
             loadModelMetrics();
@@ -543,32 +584,83 @@
                     window.liveGraph.restoreFromRecords(liveRecords);
                 }
             } catch (e) { console.warn('restore chart state failed', e); }
-            
-            // 启动轮询
-            if (window.pollLive) {
-                window.pollLive();
-                window.livePoller = setInterval(window.pollLive, 1500);
-            }
-            // 恢复选中标签（避免刷新后样式丢失）
+
+            // 顶栏状态胶囊在内容区之外，但实时页卡片上的「运行中 / 停止」在内容区里，
+            // 换页后是新节点，必须强制重画一次（setLiveRunningUI 默认在状态没变时会直接返回）。
+            try { if (typeof window.setLiveRunningUI === 'function') window.setLiveRunningUI(!!(window.liveUiState && window.liveUiState.running), { force: true }); } catch (e) {}
+
+            // 按当前页面的 mode 把落盘的历史记录画进表格：上传页只画上传、实时页只画实时、
+            // 总览与记录页把两路合并。
             try {
-                const persisted = loadUiState();
-                const persistedTabMode = (persisted && (persisted.tabMode === 'live' || persisted.tabMode === 'upload')) ? persisted.tabMode : null;
-                const preferLive = !!(window.liveUiState && window.liveUiState.running)
-                    || (persistedTabMode === 'live')
-                    || (window.recordTableMode === 'live');
-                if (preferLive) {
-                    try { if (typeof window.switchToLive === 'function') window.switchToLive(); } catch(e){}
-                } else {
-                    try { if (typeof window.switchToUpload === 'function') window.switchToUpload(); } catch(e){}
-                }
-            } catch(e) { console.warn('restore tab state failed', e); }
+                if (typeof window.renderRecordedRows === 'function') window.renderRecordedRows(window.recordTableMode);
+            } catch (e) { console.warn('restore record rows failed', e); }
             try {
                 if (typeof window.applyRecordFilter === 'function') {
                     window.applyRecordFilter(window.currentRecordFilter || 'all');
                 }
             } catch (e) { console.warn('restore record filter failed', e); }
+
+            // KPI 带与饼图的新 DOM 也是刚生成的（模板里是初始的 0），而 window.dlidsStats
+            // 一直活在窗口上没被换页清掉 —— 统一统计层是唯一写这两处的地方，所以最后必须
+            // 按它重画一次，否则换页后 KPI 会「回到 0」，与记录表里的行数自相矛盾。
+            try { if (typeof window.dlidsRenderStats === 'function') window.dlidsRenderStats(); } catch (e) { console.warn('repaint stats failed', e); }
         }, 100);
-        
+    }
+
+    function teardownPage() {
+        // 内容区即将被替换。这里不能只依赖 upload_trend_impl 的 isChartInstance()：
+        // ECharts 的 dispose() 之后 setOption / getOption 仍然是函数，旧实例会被当成
+        // 有效实例复用 → 新页面上 setOption 抛错被 catch 吞掉，图表永久空白。
+        // 所以必须显式 dispose 并把全局引用清零。
+        const dispose = (inst) => {
+            try { if (inst && typeof inst.dispose === 'function' && typeof inst.setOption === 'function') inst.dispose(); } catch (e) {}
+        };
+        dispose(window.uploadTrendChart);
+        dispose(window.uploadPieChart);
+        dispose(window.liveTrendChart);
+        dispose(window.lineChart);
+        dispose(window.pieChart);
+        window.uploadTrendChart = null;
+        window.uploadPieChart = null;
+        window.liveTrendChart = null;
+        // 这两个名字会被 HTML 命名元素访问解析成 <div>，置 null 是让 getLineChart / getPieChart
+        // 回落到 echarts.getInstanceByDom（新容器没有实例 → 重新 init）。
+        window.lineChart = null;
+        window.pieChart = null;
+
+        // 模型评估页的实例登记在模块内部的 instances 表里，必须让它自己清
+        try { window.modelEvalImpl && typeof window.modelEvalImpl.disposeAll === 'function' && window.modelEvalImpl.disposeAll(); } catch (e) { console.warn('modelEval disposeAll failed', e); }
+        // 主机辐射图是逐帧循环画的：旧 canvas 一走就要停，否则一直空转，而且重进实时页时
+        // startLoop 会被 _animLoopBound 挡住，新 canvas 永远不画。
+        try { window.liveGraph && typeof window.liveGraph.stopLoop === 'function' && window.liveGraph.stopLoop(); } catch (e) { console.warn('liveGraph stopLoop failed', e); }
+    }
+
+    window.dlidsPages = { initPage: initPage, teardownPage: teardownPage };
+
+    async function init() {
+        // 加载核心模块
+        for (const path of modulePaths) {
+            try {
+                await loadScript(path);
+                console.log(`✅ Loaded: ${path.split('/').pop()}`);
+            } catch (e) {
+                console.error(`❌ Failed: ${path}`, e);
+            }
+        }
+
+        initPage();
+
+        // 站内换页改成无刷新（见 modules/router_impl.js）。直接输网址与刷新仍是完整加载。
+        try { window.routerImpl && typeof window.routerImpl.init === 'function' && window.routerImpl.init(); } catch (e) { console.warn('routerImpl init failed', e); }
+
+        // 启动轮询（幂等：先清理可能已存在的定时器，避免 init 与 startLive 叠加出多个轮询器重复拉取）
+        // 注意：这是全站唯一的轮询器，跨页面一直活着，不随换页重建 —— 否则换页会丢一帧抓包数据。
+        if (window.pollLive) {
+            if (window.livePoller) clearInterval(window.livePoller);
+            window.pollLive();
+            window.livePoller = setInterval(window.pollLive, LIVE_POLL_INTERVAL_MS);
+        }
+
         console.log('✅ Main initialized');
     }
 

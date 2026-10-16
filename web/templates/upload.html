@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="grid-12">
+    <div class="col-4">
+        {% include "partials/upload_area.html" %}
+    </div>
+    <div class="col-8">
+        {% include "partials/trend_chart.html" %}
+    </div>
+    <div class="col-4">
+        {% include "partials/threat_chart.html" %}
+    </div>
+    <div class="col-8">
+        {% with result_title='上传检测记录', result_hint='只记录上传文件的结果', result_mode='upload', result_clear_label='清除日志' %}
+            {% include "partials/results_table.html" %}
+        {% endwith %}
+    </div>
+</div>
+{% endblock %}

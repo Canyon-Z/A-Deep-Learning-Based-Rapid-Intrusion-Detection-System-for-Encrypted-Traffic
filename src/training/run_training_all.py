@@ -16,44 +16,10 @@ from src.models.classic_cnn import ClassicCNN
 from src.models.lightweight_cnn_bilstm import Lightweight_CNN_BiLSTM
 from src.models.transformer import TrafficTransformer
 from src.models.mlp import MLP
-
-
-class PureBiLSTM(nn.Module):
-    """纯 BiLSTM 模型：把 28×28 图像按行拆成 28 个时间步，每步 28 维特征。"""
-
-    def __init__(self, input_size=28, hidden_dim=64, num_layers=2, num_classes=2):
-        super(PureBiLSTM, self).__init__()
-        self.bilstm = nn.LSTM(
-            input_size=input_size,
-            hidden_size=hidden_dim,
-            num_layers=num_layers,
-            batch_first=True,
-            bidirectional=True,
-            dropout=0.5 if num_layers > 1 else 0,
-        )
-        self.dropout = nn.Dropout(0.5)
-        self.fc = nn.Linear(hidden_dim * 2, num_classes)
-
-    def forward(self, x):
-        x = x.squeeze(1)                # [B, 1, 28, 28] → [B, 28, 28]
-        output, _ = self.bilstm(x)      # [B, 28, hidden*2]
-        last_state = output[:, -1, :]   # 取最后一个时间步
-        last_state = self.dropout(last_state)
-        return self.fc(last_state)
-
-
-def resolve_device(requested_device: str) -> torch.device:
-    """解析用户传入的设备参数，自动判断是否可用 CUDA。"""
-    requested = requested_device.lower().strip()
-    if requested == 'auto':
-        return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    if requested == 'cuda' and not torch.cuda.is_available():
-        print('警告: 当前环境没有可用 CUDA，已自动回退到 CPU。')
-        return torch.device('cpu')
-    if requested not in ('cpu', 'cuda'):
-        print(f"警告: 未知 device='{requested_device}'，已使用 auto。")
-        return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    return torch.device(requested)
+# 代码审查第 31 条：PureBiLSTM 的定义原先分散在 3 处，统一从 src/models 导入
+from src.models.pure_bilstm import PureBiLSTM
+# 代码审查第 40 条：设备解析原先 6 份复制实现，统一到 src/utils/device.py
+from src.utils.device import resolve_device
 
 
 def main():

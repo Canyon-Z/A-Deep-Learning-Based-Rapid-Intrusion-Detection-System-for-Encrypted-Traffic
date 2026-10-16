@@ -11,19 +11,9 @@ from src.preprocessing.data_loader import get_dataloaders
 from src.training.train import train_model
 from src.training.loss_utils import build_criterion, compute_class_weights
 from src.models.lightweight_cnn_bilstm import Lightweight_CNN_BiLSTM
+# 设备解析统一到 src/utils/device.py（代码审查第 40 条：原先 6 份复制实现）
+from src.utils.device import resolve_device
 
-
-def resolve_device(requested_device: str) -> torch.device:
-    requested = requested_device.lower().strip()
-    if requested == 'auto':
-        return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    if requested == 'cuda' and not torch.cuda.is_available():
-        print('警告: 当前环境没有可用 CUDA，已自动回退到 CPU。')
-        return torch.device('cpu')
-    if requested not in ('cpu', 'cuda'):
-        print(f"警告: 未知 device='{requested_device}'，已使用 auto。")
-        return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    return torch.device(requested)
 
 def main():
     parser = argparse.ArgumentParser(description="训练 Lightweight_CNN_BiLSTM 模型")

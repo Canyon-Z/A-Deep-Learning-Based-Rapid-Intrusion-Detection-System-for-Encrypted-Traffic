@@ -1,7 +1,14 @@
-<!-- Threat Distribution Chart -->
-<div class="glass-card rounded-xl p-4 flex-1 min-h-[250px] flex flex-col">
-    <h3 class="text-sm font-semibold text-gray-300 mb-4 flex items-center gap-2">
-        <i class="fa-solid fa-chart-pie text-cyber-primary"></i> 威胁类型分布
-    </h3>
-    <div id="pieChart" class="flex-1 w-full h-full"></div>
+<!-- Threat Type Distribution
+     全站固定高度 360px：口径由 window.dlidsRenderStats 统一维护，卡片本身在任何页面
+     长相与高度完全一致，切换页面不会变形。 -->
+<div class="panel flex flex-col h-[360px]">
+    <div class="panel-head">
+        <h2 class="panel-title">
+            <i class="fa-solid fa-chart-pie text-cyber-primary mr-2"></i>威胁类型分布
+        </h2>
+        <span class="panel-hint" id="threatChartHint">本次运行累计</span>
+    </div>
+    <div class="p-4 flex-1 min-h-[240px]">
+        <div id="pieChart" class="w-full h-full"></div>
+    </div>
 </div>

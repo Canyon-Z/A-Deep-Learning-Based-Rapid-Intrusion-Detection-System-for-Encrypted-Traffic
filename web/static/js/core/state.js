@@ -4,6 +4,8 @@
     'use strict';
 
     const STORAGE_KEY = 'malware_detector_state';
+    const MAX_PERSIST_RECORDS = 300; // localStorage 中每种记录（upload/live）最多保留最近 300 条
+    const MAX_PERSIST_BYTES = 3 * 1024 * 1024; // 序列化后的字节上限：3 MB
     
     // 状态定义
     const AppState = {
@@ -21,21 +23,68 @@
         config: { maxRecordsPerType: 500, maxTrendPoints: 50, pollIntervalMs: 1500, autoSave: true }
     };
 
+    // 序列化后的 UTF-8 字节数：localStorage 配额按字节计算，不能只看字符数
+    function jsonByteLength(str) {
+        if (!str) return 0;
+        try { if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(str).length; } catch (e) { /* fallthrough */ }
+        return str.length * 2; // 兜底：保守估计
+    }
+
+    // 组装持久化 JSON，双重上限保护：
+    //   1) 条数：每种记录只取最近 MAX_PERSIST_RECORDS 条；
+    //   2) 字节：序列化后超过 MAX_PERSIST_BYTES 时，从最旧的记录开始裁剪（upload/live 交替，数组为追加序，头部即最旧）。
+    function buildPersistSnapshot() {
+        const records = AppState.records || {};
+        const upload = (Array.isArray(records.upload) ? records.upload : []).slice(-MAX_PERSIST_RECORDS);
+        const live = (Array.isArray(records.live) ? records.live : []).slice(-MAX_PERSIST_RECORDS);
+        const serialize = () => JSON.stringify({
+            records: { upload, live },
+            totalScans: AppState.totalScans,
+            malwareCount: AppState.malwareCount,
+            trendLabels: AppState.trendLabels.slice(-50),
+            benignTrend: AppState.benignTrend.slice(-50),
+            malwareTrend: AppState.malwareTrend.slice(-50),
+            live: { selectedInterface: AppState.live.selectedInterface, captureModel: AppState.live.captureModel },
+            modelConfig: { currentModel: AppState.modelConfig.currentModel }
+        });
+
+        let json = serialize();
+        let bytes = jsonByteLength(json);
+        let turn = 0;
+        let guard = 0; // 防御性上限，避免任何异常情况下出现死循环
+        while (bytes > MAX_PERSIST_BYTES && (upload.length || live.length) && guard++ < 700) {
+            // 按平均单条字节数估算要裁掉多少条，一次多裁一些，避免逐条重新序列化
+            const total = upload.length + live.length;
+            const perEntry = Math.max(1, Math.ceil(bytes / total));
+            const dropCount = Math.min(total, Math.max(1, Math.ceil((bytes - MAX_PERSIST_BYTES) / perEntry)));
+            for (let i = 0; i < dropCount; i++) {
+                const order = (turn++ % 2 === 0) ? [upload, live] : [live, upload];
+                const target = order.find((arr) => arr.length > 0);
+                if (!target) break;
+                target.shift(); // 从最旧的记录开始丢弃
+            }
+            json = serialize();
+            bytes = jsonByteLength(json);
+        }
+        return json;
+    }
+
     // 持久化
     function persist() {
         if (!AppState.config.autoSave) return;
         try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify({
-                records: { upload: AppState.records.upload.slice(-500), live: AppState.records.live.slice(-500) },
-                totalScans: AppState.totalScans,
-                malwareCount: AppState.malwareCount,
-                trendLabels: AppState.trendLabels.slice(-50),
-                benignTrend: AppState.benignTrend.slice(-50),
-                malwareTrend: AppState.malwareTrend.slice(-50),
-                live: { selectedInterface: AppState.live.selectedInterface, captureModel: AppState.live.captureModel },
-                modelConfig: { currentModel: AppState.modelConfig.currentModel }
-            }));
-        } catch(e) { console.warn('Persist failed:', e); }
+            if (typeof localStorage === 'undefined' || !localStorage) return;
+            localStorage.setItem(STORAGE_KEY, buildPersistSnapshot());
+        } catch(e) {
+            const isQuota = e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22 || e.code === 1014 || /quota/i.test(String(e.message || '')));
+            if (isQuota) {
+                // 裁剪后仍写不进去（通常是浏览器总配额已被其它 key 占满）：清空该 key 并明确告警，不再静默失败
+                try { localStorage.removeItem(STORAGE_KEY); } catch (removeErr) { /* ignore */ }
+                console.warn('Persist failed: localStorage 配额超限（QuotaExceededError），已清空并重置本地状态记录（key=' + STORAGE_KEY + '）；内存中的状态仍保留，但本次及其后的写入在配额恢复前都会失败。', e);
+                return;
+            }
+            console.warn('Persist failed:', e);
+        }
     }
 
     // 恢复
@@ -43,8 +92,21 @@
         try {
             const saved = localStorage.getItem(STORAGE_KEY);
             if (saved) {
-                const data = JSON.parse(saved);
-                if (data.records) { if (data.records.upload) AppState.records.upload = data.records.upload; if (data.records.live) AppState.records.live = data.records.live; }
+                let data;
+                try {
+                    data = JSON.parse(saved);
+                } catch (parseErr) {
+                    // 本地数据已损坏：清空该 key 并明确告警，避免每次启动都解析失败
+                    try { localStorage.removeItem(STORAGE_KEY); } catch (removeErr) { /* ignore */ }
+                    console.warn('Restore failed: 本地状态（key=' + STORAGE_KEY + '）不是合法 JSON，已清空并重置该键。', parseErr);
+                    return;
+                }
+                if (data.records) {
+                    // 恢复侧沿用原内存上限（AppState.config.maxRecordsPerType=500），300 条只是“写盘”上限
+                    const memoryCap = AppState.config.maxRecordsPerType || 500;
+                    if (Array.isArray(data.records.upload)) AppState.records.upload = data.records.upload.slice(-memoryCap);
+                    if (Array.isArray(data.records.live)) AppState.records.live = data.records.live.slice(-memoryCap);
+                }
                 if (data.totalScans) AppState.totalScans = data.totalScans;
                 if (data.malwareCount) AppState.malwareCount = data.malwareCount;
                 if (data.trendLabels) AppState.trendLabels = data.trendLabels;

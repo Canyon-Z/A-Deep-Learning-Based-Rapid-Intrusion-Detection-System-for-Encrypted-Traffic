@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="grid-12">
+    <div class="col-12">
+        {% with result_title='全部检测记录', result_hint='上传与实时抓包合并显示，按时间倒序', result_mode='all', result_clear_label='清除全部' %}
+            {% include "partials/results_table.html" %}
+        {% endwith %}
+    </div>
+</div>
+{% endblock %}

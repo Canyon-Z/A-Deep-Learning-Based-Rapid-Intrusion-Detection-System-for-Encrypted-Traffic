@@ -1,2 +1,12 @@
 # Ignore dataset folder
 data/
+
+# 本地凭据与运行时产物
+web/backend/users.json
+web/backend/.session_secret
+.tmp_preview/
+.tmp_verify/
+
+# Python 字节码
+__pycache__/
+*.pyc

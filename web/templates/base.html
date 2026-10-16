@@ -1,0 +1,21 @@
+{% include "partials/head.html" %}
+<body class="app-shell">
+
+    {% include "partials/sidebar.html" %}
+
+    <div class="app-main">
+        {% include "partials/topbar.html" %}
+
+        <main class="app-content">
+            {{ status_block | safe }}
+
+            {% include "partials/stats_panel.html" %}
+
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    {% include "partials/detail_modal.html" %}
+    {% include "partials/scripts.html" %}
+</body>
+</html>

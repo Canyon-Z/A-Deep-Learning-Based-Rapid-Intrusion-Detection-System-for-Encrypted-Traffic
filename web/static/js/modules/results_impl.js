@@ -3,8 +3,26 @@
     window.resultsImpl = window.resultsImpl || {};
     const RECORDS_STORAGE_KEY = 'detection_records';
     const MAX_RECORDS_PER_KIND = 500;
+    const MAX_PERSIST_RECORDS_PER_KIND = 300; // localStorage 中每种记录（upload/live）最多保留最近 300 条
+    const MAX_PERSIST_BYTES = 3 * 1024 * 1024; // localStorage 中该 key 序列化后的字节上限：3 MB
     const PERSIST_DEBOUNCE_MS = 300; // debounce writes to localStorage
     const PERSIST_BACKOFF_MS = 60 * 1000; // backoff on quota error
+
+    // HTML 转义：优先复用 core/utils.js 的 Utils.escapeHtml（main.js 在加载本文件之前已加载 core/utils.js），
+    // 若工具模块尚未就绪则本地兜底，保证任何路径下都不会把未转义的外部数据拼进 innerHTML。
+    function escapeHtml(value) {
+        if (value === null || value === undefined) return '';
+        if (window.Utils && typeof window.Utils.escapeHtml === 'function') return window.Utils.escapeHtml(value);
+        if (typeof window.escapeHtml === 'function' && window.escapeHtml !== escapeHtml) return window.escapeHtml(value);
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    window.resultsImpl.escapeHtml = escapeHtml;
 
     window.resultsImpl.toPersistableEntry = function(entry) {
         const safe = entry && typeof entry === 'object' ? entry : {};
@@ -23,38 +41,72 @@
         };
     };
 
+    // 序列化后的 UTF-8 字节数：localStorage 配额是按字节计算的，不能只看字符数（中文/emoji 占多字节）
+    function jsonByteLength(str) {
+        if (!str) return 0;
+        try { if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(str).length; } catch (e) { /* fallthrough */ }
+        return str.length * 2; // 兜底：保守估计
+    }
+
+    // 组装待写入 localStorage 的 JSON 文本，双重上限保护：
+    //   1) 条数：每种记录只取最近 MAX_PERSIST_RECORDS_PER_KIND 条（upload/live 各自独立）；
+    //   2) 字节：序列化后若超过 MAX_PERSIST_BYTES，就从最旧的记录开始裁剪（upload/live 交替，数组为追加序，头部即最旧），
+    //      直到低于上限为止，避免 QuotaExceededError。
+    function buildPersistableJson() {
+        const stores = window.recordStores || {};
+        const upload = (Array.isArray(stores.upload) ? stores.upload : []).slice(-MAX_PERSIST_RECORDS_PER_KIND);
+        const live = (Array.isArray(stores.live) ? stores.live : []).slice(-MAX_PERSIST_RECORDS_PER_KIND);
+        const serialize = () => JSON.stringify({
+            upload: upload.map(window.resultsImpl.toPersistableEntry),
+            live: live.map(window.resultsImpl.toPersistableEntry)
+        });
+
+        let json = serialize();
+        let bytes = jsonByteLength(json);
+        let turn = 0;
+        let guard = 0; // 防御性上限，避免任何异常情况下出现死循环
+        while (bytes > MAX_PERSIST_BYTES && (upload.length || live.length) && guard++ < 700) {
+            // 按平均单条字节数估算要裁掉多少条，一次多裁一些，避免逐条重新序列化
+            const total = upload.length + live.length;
+            const perEntry = Math.max(1, Math.ceil(bytes / total));
+            const dropCount = Math.min(total, Math.max(1, Math.ceil((bytes - MAX_PERSIST_BYTES) / perEntry)));
+            for (let i = 0; i < dropCount; i++) {
+                const order = (turn++ % 2 === 0) ? [upload, live] : [live, upload];
+                const target = order.find((arr) => arr.length > 0);
+                if (!target) break;
+                target.shift(); // 从最旧的记录开始丢弃
+            }
+            json = serialize();
+            bytes = jsonByteLength(json);
+        }
+        return json;
+    }
+
     window.resultsImpl.persistRecordStores = function() {
+        let acquired = false;
         try {
             window.resultsImpl = window.resultsImpl || {};
             // avoid concurrent persist runs
             if (window.resultsImpl._persistInFlight) return;
             window.resultsImpl._persistInFlight = true;
+            acquired = true;
             // respect backoff after quota error
             const now = Date.now();
-            if (window.resultsImpl._persistBackoffUntil && now < window.resultsImpl._persistBackoffUntil) { window.resultsImpl._persistInFlight = false; return; }
+            if (window.resultsImpl._persistBackoffUntil && now < window.resultsImpl._persistBackoffUntil) return;
 
             window.recordStores = window.recordStores || { live: [], upload: [] };
-            const buildPayload = (maxEntries) => ({
-                upload: (Array.isArray(window.recordStores.upload) ? window.recordStores.upload : [])
-                    .slice(-maxEntries)
-                    .map(window.resultsImpl.toPersistableEntry),
-                live: (Array.isArray(window.recordStores.live) ? window.recordStores.live : [])
-                    .slice(-maxEntries)
-                    .map(window.resultsImpl.toPersistableEntry)
-            });
 
             if (!(window.localStorage && window.localStorage.setItem)) return;
 
-            // first try full size
-            let payload = buildPayload(MAX_RECORDS_PER_KIND);
+            // 先按条数 + 字节双重上限裁剪，再写入
+            const json = buildPersistableJson();
             try {
-                window.localStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(payload));
+                window.localStorage.setItem(RECORDS_STORAGE_KEY, json);
                 // clear any prior backoff
                 window.resultsImpl._persistBackoffUntil = 0;
                 return;
             } catch (e) {
-                // if quota exceeded, attempt to trim payload and retry a few times
-                const isQuota = e && (e.name === 'QuotaExceededError' || e.code === 22 || /quota/i.test(String(e.message || '')));
+                const isQuota = e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22 || e.code === 1014 || /quota/i.test(String(e.message || '')));
                 if (!isQuota) {
                     // warn but throttle repeated messages
                     const last = window.resultsImpl._lastPersistWarnTs || 0;
@@ -62,39 +114,19 @@
                         console.warn('resultsImpl.persistRecordStores failed', e);
                         window.resultsImpl._lastPersistWarnTs = Date.now();
                     }
-                    window.resultsImpl._persistInFlight = false;
                     return;
                 }
-                // set a short backoff immediately to avoid many concurrent retries
+                // 配额超限（裁剪后仍然写不进去，通常是浏览器总配额已被其它 key 占满）：
+                // 不能再静默吞掉异常，清空该 key 并给出明确告警，同时短时退避避免刷屏。
+                try { window.localStorage.removeItem(RECORDS_STORAGE_KEY); } catch (removeErr) { /* ignore */ }
+                console.warn('resultsImpl.persistRecordStores: localStorage 配额超限（QuotaExceededError），已清空并重置本地检测记录（key=' + RECORDS_STORAGE_KEY + '）；本次写入放弃，' + Math.round(PERSIST_BACKOFF_MS / 1000) + ' 秒内不再重试。', e);
                 window.resultsImpl._persistBackoffUntil = Date.now() + PERSIST_BACKOFF_MS;
-                // attempt with progressively smaller payloads (best-effort)
-                const sizes = [200, 100, 50, 20, 5];
-                let success = false;
-                for (const s of sizes) {
-                    try {
-                        payload = buildPayload(s);
-                        window.localStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(payload));
-                        success = true; break;
-                    } catch (ee) { /* try next */ }
-                }
-                if (!success) {
-                    // give up for a while to avoid repeated console spam
-                    const last = window.resultsImpl._lastPersistWarnTs || 0;
-                    if (Date.now() - last > 5000) {
-                        console.warn('resultsImpl.persistRecordStores failing due to storage quota — backing off for', PERSIST_BACKOFF_MS, 'ms');
-                        window.resultsImpl._lastPersistWarnTs = Date.now();
-                    }
-                    window.resultsImpl._persistInFlight = false;
-                    return;
-                }
-                // success: clear backoff so future writes may resume
-                window.resultsImpl._persistBackoffUntil = 0;
             }
         } catch (e) {
             console.warn('resultsImpl.persistRecordStores failed', e);
         }
         finally {
-            try { window.resultsImpl._persistInFlight = false; } catch(_){}
+            try { if (acquired) window.resultsImpl._persistInFlight = false; } catch(_){}
         }
     };
 
@@ -104,9 +136,18 @@
             if (!(window.localStorage && window.localStorage.getItem)) return;
             const raw = window.localStorage.getItem(RECORDS_STORAGE_KEY);
             if (!raw) return;
-            const data = JSON.parse(raw);
+            let data;
+            try {
+                data = JSON.parse(raw);
+            } catch (parseErr) {
+                // 本地数据已损坏：清空该 key 并明确告警，避免每次启动都解析失败
+                try { window.localStorage.removeItem(RECORDS_STORAGE_KEY); } catch (removeErr) { /* ignore */ }
+                console.warn('resultsImpl.restoreRecordStores: 本地检测记录（key=' + RECORDS_STORAGE_KEY + '）不是合法 JSON，已清空并重置该键。', parseErr);
+                return;
+            }
             const restoredUpload = Array.isArray(data && data.upload) ? data.upload : [];
             const restoredLive = Array.isArray(data && data.live) ? data.live : [];
+            // 恢复侧沿用原内存上限（MAX_RECORDS_PER_KIND=500），300 条只是“写盘”上限，不改动原有内存语义
             window.recordStores.upload = restoredUpload.slice(-MAX_RECORDS_PER_KIND);
             window.recordStores.live = restoredLive.slice(-MAX_RECORDS_PER_KIND);
         } catch (e) {
@@ -116,7 +157,7 @@
 
     window.resultsImpl.normalizeDetailPayload = function(data) {
         const d = data && typeof data === 'object' ? data : {};
-        return { name: d.name || '', statusText: d.statusText || d.status || d.confidence_label || d.result || '', conf: d.conf || d.confidence || '0', execTime: d.execution_time || d.execTime || d.duration_ms || d.time_ms || '-', captureTime: d.capture_time || d.captureTime || d.timestamp || '', imageData: d.imageData || d.image_data || d.image || d.visualization || d.visualization_data || '', payloadDist: d.payloadDist || d.payload_dist || d.payload_distribution || d.histogram || null, flows: Array.isArray(d.flows) ? d.flows : [], sessionParseReport: d.sessionParseReport || d.session_parse_report || d.parse_report || d.session_report || null };
+        return { name: d.name || '', statusText: d.statusText || d.status || d.confidence_label || d.result || '', conf: d.conf || d.confidence || '0', execTime: d.execution_time || d.execTime || d.duration_ms || d.time_ms || '-', captureTime: d.capture_time || d.captureTime || d.timestamp || '', imageData: d.imageData || d.image_data || d.image || d.visualization || d.visualization_data || '', payloadDist: d.payloadDist || d.payload_dist || d.payload_distribution || d.histogram || null, flows: Array.isArray(d.flows) ? d.flows : [], flowsTotal: Number.isFinite(Number(d.flows_total)) ? Number(d.flows_total) : (Array.isArray(d.flows) ? d.flows.length : 0), flowsTruncated: !!d.flows_truncated, sessionParseReport: d.sessionParseReport || d.session_parse_report || d.parse_report || d.session_report || null };
     };
 
     window.resultsImpl.formatConfidenceText = function(value) {
@@ -177,7 +218,7 @@
         const maxBin = Math.max(...bins, 1);
         const barWidth = 10; const gap = 3; const chartX = 26; const chartY = 126; const chartH = 60;
         const bars = bins.map((v, i) => { const h = Math.max(2, Math.round((v / maxBin) * chartH)); const x = chartX + i * (barWidth + gap); const y = chartY + (chartH - h); return `<rect x="${x}" y="${y}" width="${barWidth}" height="${h}" rx="2" fill="url(#barGrad)" opacity="0.95"/>`; }).join('');
-        const svg = `\n<svg xmlns="http://www.w3.org/2000/svg" width="560" height="260" viewBox="0 0 560 260">\n    <defs>\n        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">\n            <stop offset="0%" stop-color="#0b0f1e"/>\n            <stop offset="100%" stop-color="#101a35"/>\n        </linearGradient>\n        <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">\n            <stop offset="0%" stop-color="#22d3ee"/>\n            <stop offset="100%" stop-color="#2563eb"/>\n        </linearGradient>\n        <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">\n            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>\n            <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>\n        </filter>\n    </defs>\n    <rect width="560" height="260" fill="url(#bg)" rx="18"/>\n    <circle cx="110" cy="82" r="34" fill="rgba(34,211,238,0.15)" stroke="#22d3ee" stroke-width="2"/>\n    <circle cx="450" cy="82" r="34" fill="rgba(37,99,235,0.15)" stroke="#60a5fa" stroke-width="2"/>\n    <line x1="145" y1="82" x2="415" y2="82" stroke="#22d3ee" stroke-width="4" stroke-linecap="round" filter="url(#glow)"/>\n    <polygon points="415,82 402,74 402,90" fill="#22d3ee"/>\n    <text x="110" y="78" text-anchor="middle" fill="#e5e7eb" font-size="14" font-family="sans-serif">SRC</text>\n    <text x="110" y="98" text-anchor="middle" fill="#9ca3af" font-size="11" font-family="monospace">${(list[0] && (list[0].src_ip || list[0].src)) || 'unknown'}</text>\n    <text x="450" y="78" text-anchor="middle" fill="#e5e7eb" font-size="14" font-family="sans-serif">DST</text>\n    <text x="450" y="98" text-anchor="middle" fill="#9ca3af" font-size="11" font-family="monospace">${(list[0] && (list[0].dst_ip || list[0].dst)) || 'unknown'}</text>\n    <text x="280" y="58" text-anchor="middle" fill="#e5e7eb" font-size="18" font-weight="700" font-family="sans-serif">${name || 'Traffic Detail'}</text>\n    <text x="280" y="80" text-anchor="middle" fill="#7dd3fc" font-size="12" font-family="monospace">${result || '-'} · ${conf || '0.00%'}</text>\n    <text x="280" y="118" text-anchor="middle" fill="#cbd5e1" font-size="12" font-family="sans-serif">Flow Summary: ${list.length} records · Malware ${mal} · Benign ${benign}</text>\n    ${bars}\n    <text x="26" y="204" fill="#9ca3af" font-size="10" font-family="monospace">Payload histogram fallback when original image is unavailable</text>\n</svg>`;
+        const svg = `\n<svg xmlns="http://www.w3.org/2000/svg" width="560" height="260" viewBox="0 0 560 260">\n    <defs>\n        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">\n            <stop offset="0%" stop-color="#0b0f1e"/>\n            <stop offset="100%" stop-color="#101a35"/>\n        </linearGradient>\n        <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">\n            <stop offset="0%" stop-color="#22d3ee"/>\n            <stop offset="100%" stop-color="#2563eb"/>\n        </linearGradient>\n        <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">\n            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>\n            <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>\n        </filter>\n    </defs>\n    <rect width="560" height="260" fill="url(#bg)" rx="18"/>\n    <circle cx="110" cy="82" r="34" fill="rgba(34,211,238,0.15)" stroke="#22d3ee" stroke-width="2"/>\n    <circle cx="450" cy="82" r="34" fill="rgba(37,99,235,0.15)" stroke="#60a5fa" stroke-width="2"/>\n    <line x1="145" y1="82" x2="415" y2="82" stroke="#22d3ee" stroke-width="4" stroke-linecap="round" filter="url(#glow)"/>\n    <polygon points="415,82 402,74 402,90" fill="#22d3ee"/>\n    <text x="110" y="78" text-anchor="middle" fill="#e5e7eb" font-size="14" font-family="sans-serif">SRC</text>\n    <text x="110" y="98" text-anchor="middle" fill="#9ca3af" font-size="11" font-family="monospace">${window.resultsImpl.escapeSvgText((list[0] && (list[0].src_ip || list[0].src)) || 'unknown')}</text>\n    <text x="450" y="78" text-anchor="middle" fill="#e5e7eb" font-size="14" font-family="sans-serif">DST</text>\n    <text x="450" y="98" text-anchor="middle" fill="#9ca3af" font-size="11" font-family="monospace">${window.resultsImpl.escapeSvgText((list[0] && (list[0].dst_ip || list[0].dst)) || 'unknown')}</text>\n    <text x="280" y="58" text-anchor="middle" fill="#e5e7eb" font-size="18" font-weight="700" font-family="sans-serif">${window.resultsImpl.escapeSvgText(name || 'Traffic Detail')}</text>\n    <text x="280" y="80" text-anchor="middle" fill="#7dd3fc" font-size="12" font-family="monospace">${window.resultsImpl.escapeSvgText(result || '-')} · ${window.resultsImpl.escapeSvgText(conf || '0.00%')}</text>\n    <text x="280" y="118" text-anchor="middle" fill="#cbd5e1" font-size="12" font-family="sans-serif">Flow Summary: ${list.length} records · Malware ${mal} · Benign ${benign}</text>\n    ${bars}\n    <text x="26" y="204" fill="#9ca3af" font-size="10" font-family="monospace">Payload histogram fallback when original image is unavailable</text>\n</svg>`;
         return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
     };
 
@@ -199,10 +240,14 @@
             const recordKind = options.recordKind || 'upload';
             const currentMode = window.recordTableMode || 'upload';
             if (!options.skipCache) { window.cacheRecordedRow && window.cacheRecordedRow(recordKind, { name, size, time, data: Object.assign({}, data || {}), options: Object.assign({}, options || {}, { recordKind }) }); }
-            const shouldRender = !!options.forceRender || recordKind === currentMode;
+            // mode='all'（总览页 / 记录页）要同时显示两路记录；'live' / 'upload' 只显示各自那一路
+            const shouldRender = !!options.forceRender || recordKind === currentMode || currentMode === 'all';
             if (!shouldRender) return 'row_stub_' + Date.now();
             const row = document.createElement('tr');
-            row.className = 'border-b border-cyber-border/50';
+            // 新到达的行做一次单次高亮（styles.css 的 .mo-row-new，420ms 后自行褪去）：
+            // 只改自身背景，不改行高、不推动其他行，也不让整张表持续动。
+            row.className = 'border-b border-cyber-border/50 mo-row-new';
+            setTimeout(() => row.classList.remove('mo-row-new'), 460);
             const status = data && data.status ? String(data.status) : '-';
             const isMal = status.includes('Malicious') || status.includes('Malware');
             row.dataset.recordType = isMal ? 'malware' : 'benign';
@@ -213,12 +258,26 @@
                 ? (data.model_name || data.detected_model_name || data.model || data.detected_model || data.model_type)
                 : window.currentActiveModel;
             const modelName = window.getModelDisplayName ? window.getModelDisplayName(rawModelName) : rawModelName;
-            const rowId = 'row_' + Date.now();
+            // 同一毫秒内可能批量插入多行（实时页每轮最多 25 行），rowId 必须唯一；
+            // 否则 __detailsDataMap 后写覆盖先写，不同行会打开同一份详情数据。
+            window.__rowIdSeq = (window.__rowIdSeq || 0) + 1;
+            const rowId = 'row_' + Date.now() + '_' + window.__rowIdSeq;
             window.__detailsDataMap = window.__detailsDataMap || {};
             window.__detailsDataMap[rowId] = window.resultsImpl.normalizeDetailPayload(Object.assign({ rowId, name, size, time, statusText: isMal ? 'Malware' : 'Benign', conf: data && (data.confidence || data.conf || data.malware_conf) ? String(data.confidence || data.conf || data.malware_conf) : '0', }, data || {}));
             function protoToName(p) { if (p === null || p === undefined || p === '') return '-'; const n = Number(p); const map = { 1: 'ICMP', 6: 'TCP', 17: 'UDP', 41: 'IPv6', 47: 'GRE', 50: 'ESP', 51: 'AH', 89: 'OSPF' }; if (Number.isFinite(n) && map[n]) return map[n] + ' (' + n + ')'; return String(p); }
             const displaySize = (size && size !== '-' && size !== null && size !== undefined) ? size : (data && (data.size || data.bytes || data.length) ? (data.size || data.bytes || data.length) : (data && (data.proto || data.protocol) ? protoToName(data.proto || data.protocol) : '-'));
-            row.innerHTML = `<td class="px-6 py-4 font-mono text-white truncate max-w-[200px]" title="${name}">${name}</td>` + `<td class="px-6 py-4 text-gray-400">${time}</td>` + `<td class="px-6 py-4 font-mono text-cyan-400">${durationText}</td>` + `<td class="px-6 py-4 text-gray-400">${displaySize}</td>` + `<td class="px-6 py-4">${isMal ? '<span class="text-cyber-danger">Malware</span>' : '<span class="text-cyber-success">Benign</span>'}</td>` + `<td class="px-6 py-4 text-gray-300">${modelName}</td>` + `<td class="px-6 py-4 font-mono text-cyber-primary">${displayConf}%</td>` + `<td class="px-6 py-4"><button type="button" data-row-id="${rowId}" class="text-gray-400 hover:text-white transition-colors text-sm underline view-details-btn">详情</button></td>`;
+            // 外部数据（文件名 name、时间 time、耗时、大小/协议、模型名、置信度、rowId）一律先 escapeHtml 再插值，
+            // 只转义插值数据，模板里的 <td>/<button>/class 等结构标签保持原样。
+            // mode='all' 的表格比单路表格多一列「来源」，用于区分这一行是上传检测还是实时抓包
+            const sourceTd = currentMode === 'all'
+                ? `<td class="px-6 py-4">${recordKind === 'live' ? '<span class="src-badge is-live">实时</span>' : '<span class="src-badge">上传</span>'}</td>`
+                : '';
+            row.dataset.recordSource = recordKind;
+            row.innerHTML = `<td class="px-6 py-4 font-mono text-white truncate max-w-[200px]" title="${escapeHtml(name)}">${escapeHtml(name)}</td>` + sourceTd + `<td class="px-6 py-4 text-gray-400">${escapeHtml(time)}</td>` + `<td class="px-6 py-4 font-mono text-cyan-400">${escapeHtml(durationText)}</td>` + `<td class="px-6 py-4 text-gray-400">${escapeHtml(displaySize)}</td>` + `<td class="px-6 py-4">${isMal ? '<span class="text-cyber-danger">Malware</span>' : '<span class="text-cyber-success">Benign</span>'}</td>` + `<td class="px-6 py-4 text-gray-300">${escapeHtml(modelName)}</td>` + `<td class="px-6 py-4 font-mono text-cyber-primary">${escapeHtml(displayConf)}%</td>` + `<td class="px-6 py-4"><button type="button" data-row-id="${escapeHtml(rowId)}" class="text-gray-400 hover:text-white transition-colors text-sm underline view-details-btn">详情</button></td>`;
+            // 插入真实记录前先移除空态占位行（colspan 单元格）：
+            // 否则“暂无…记录”的提示会一直残留在表格底部，与真实数据同时显示
+            const placeholder = tbody.querySelector('tr > td[colspan]');
+            if (placeholder && placeholder.parentNode) placeholder.parentNode.remove();
             tbody.insertBefore(row, tbody.firstChild);
             return rowId;
         } catch (e) { console.warn('resultsImpl.addResultRow failed', e); return 'row_stub_' + Date.now(); }
@@ -247,29 +306,28 @@
         } catch (e) { console.warn('bindDetailButtonEvents failed', e); }
     };
 
+    // 清除按钮：上传页清上传、实时页清实时（含辐射图上的历史点）、总览与记录页清全部。
+    window.resultsImpl.clearRecords = function() {
+        const mode = pageMode();
+        if (mode !== 'upload') {
+            // 辐射图自己维护了一份会话/节点缓存，先让它清干净
+            try { if (window.liveGraph && typeof window.liveGraph.clearLiveLogs === 'function') window.liveGraph.clearLiveLogs(); } catch (e) {}
+            window.resultsImpl.clearLiveRecords();
+        }
+        if (mode !== 'live') {
+            window.resultsImpl.clearUploadRecords();
+        }
+        try { if (typeof window.resultsImpl.renderRecordedRows === 'function') window.resultsImpl.renderRecordedRows(mode); } catch (e) {}
+        return null;
+    };
+
     window.resultsImpl.bindClearButtons = function() {
         try {
-            const uploadBtn = document.getElementById('clearUploadLogsBtn');
-            if (uploadBtn && !uploadBtn._boundClick) {
-                uploadBtn._boundClick = () => window.resultsImpl.clearUploadRecords();
-                uploadBtn.addEventListener('click', uploadBtn._boundClick);
+            const clearBtn = document.getElementById('clearUploadLogsBtn');
+            if (clearBtn && !clearBtn._boundClick) {
+                clearBtn._boundClick = () => window.resultsImpl.clearRecords();
+                clearBtn.addEventListener('click', clearBtn._boundClick);
             }
-            // keep visibility in sync with current record table mode (hide upload-clear on live view)
-            function updateClearButtonsVisibility() {
-                try {
-                    const mode = window.recordTableMode || 'upload';
-                    if (uploadBtn) uploadBtn.style.display = (mode === 'upload') ? '' : 'none';
-                } catch (e) { /* ignore */ }
-            }
-            // initial visibility
-            try { updateClearButtonsVisibility(); } catch (e) {}
-            // watch tab buttons if present to update visibility on user click
-            try {
-                const tabLive = document.getElementById('tabLive');
-                const tabUpload = document.getElementById('tabUpload');
-                if (tabLive && !tabLive._clearVisBound) { tabLive._clearVisBound = true; tabLive.addEventListener('click', () => { window.recordTableMode = 'live'; updateClearButtonsVisibility(); }); }
-                if (tabUpload && !tabUpload._clearVisBound) { tabUpload._clearVisBound = true; tabUpload.addEventListener('click', () => { window.recordTableMode = 'upload'; updateClearButtonsVisibility(); }); }
-            } catch (e) {}
         } catch (e) { console.warn('bindClearButtons failed', e); }
     };
 
@@ -295,11 +353,35 @@
         } catch (e) { console.warn('schedulePersist failed', e); }
     };
 
+    // ── 记录表的三条规则 ──────────────────────────────────────────────────
+    // 1. 页面模式只由当前页面模板的 data-mode 决定（main.js 启动时写进 window.recordTableMode）；
+    //    渲染函数绝不反过来修改它 —— 之前 renderRecordedRows('live') 会把总览页改成 live 模式，
+    //    列数与内容跟着一起错。
+    // 2. mode='all' 的表格合并两路记录（多一列「来源」），单路页面只看自己那一路。
+    // 3. 清除按钮的文案由模板给出，这里只决定清哪一路。
+    function pageMode() {
+        const mode = String(window.recordTableMode || 'upload');
+        return (mode === 'live' || mode === 'all') ? mode : 'upload';
+    }
+    window.resultsImpl.pageMode = pageMode;
+
+    function emptyStateText(mode) {
+        if (mode === 'live') return '暂无实时抓包记录，启动后会只显示实时流量。';
+        if (mode === 'all') return '暂无检测记录，上传文件或开始抓包后这里会出现记录。';
+        return '暂无上传检测记录，请上传文件开始检测';
+    }
+
+    function emptyStateRow(mode) {
+        const colspan = mode === 'all' ? 9 : 8;
+        return `<tr class="border-b border-cyber-border/50"><td class="px-6 py-4 text-gray-500 text-center" colspan="${colspan}">${escapeHtml(emptyStateText(mode))}</td></tr>`;
+    }
+
     window.resultsImpl.clearUploadRecords = function() {
         try {
             window.recordStores = window.recordStores || { live: [], upload: [] };
             window.recordStores.upload = [];
 
+            // 只丢弃「上传检测」产生的详情，实时记录对应的详情仍然有效
             window.__detailsDataMap = window.__detailsDataMap || {};
             Object.keys(window.__detailsDataMap).forEach((key) => {
                 const payload = window.__detailsDataMap[key];
@@ -310,14 +392,7 @@
                 window.uploadTrendImpl.resetTrendChart();
             }
 
-            const tbody = document.getElementById('resultTableBody');
-            if (tbody) {
-                tbody.innerHTML = '<tr class="border-b border-cyber-border/50"><td class="px-6 py-4 text-gray-500 text-center" colspan="8">暂无上传检测记录，请上传文件开始检测</td></tr>';
-            }
-
-            window.recordTableMode = 'upload';
             window.currentRecordFilter = 'all';
-            try { if (typeof window.applyRecordFilter === 'function') window.applyRecordFilter('all'); } catch (e) {}
             window.resultsImpl.persistRecordStores();
             try { if (typeof window.persistUiState === 'function') window.persistUiState(); } catch (e) {}
         } catch (e) {
@@ -325,25 +400,69 @@
         }
     };
 
+    window.resultsImpl.clearLiveRecords = function() {
+        try {
+            window.recordStores = window.recordStores || { live: [], upload: [] };
+            window.recordStores.live = [];
+            window._liveSeen = new Set();
+            // 清空时间点落盘：轮询会把早于它的流过滤掉，刷新页面后不会又把旧流拉回来
+            window.liveLogsClearedAt = Date.now() / 1000;
+            try { window.localStorage && window.localStorage.setItem && window.localStorage.setItem('liveLogsClearedAt', String(window.liveLogsClearedAt)); } catch (e) {}
+
+            window.__detailsDataMap = window.__detailsDataMap || {};
+            Object.keys(window.__detailsDataMap).forEach((key) => {
+                const payload = window.__detailsDataMap[key];
+                if (payload && payload.liveCapture) delete window.__detailsDataMap[key];
+            });
+
+            if (window.liveTrendImpl && typeof window.liveTrendImpl.resetTrendChart === 'function') {
+                window.liveTrendImpl.resetTrendChart();
+            }
+
+            window.resultsImpl.persistRecordStores();
+            try { if (typeof window.persistUiState === 'function') window.persistUiState(); } catch (e) {}
+        } catch (e) {
+            console.warn('resultsImpl.clearLiveRecords failed', e);
+        }
+    };
+
     window.resultsImpl.renderRecordedRows = function(kind) {
         try {
             const tbody = document.getElementById('resultTableBody');
             if (!tbody) return;
-            const list = (window.recordStores && Array.isArray(window.recordStores[kind])) ? window.recordStores[kind] : [];
-            window.recordTableMode = kind;
+            const mode = pageMode();
+            // 目标列表：总览/记录页把两路合并，其余页面只看自己那一路
+            const wanted = mode === 'all' ? 'all' : ((kind === 'live' || kind === 'upload') ? kind : mode);
+            const uploads = (window.recordStores && Array.isArray(window.recordStores.upload)) ? window.recordStores.upload : [];
+            const lives = (window.recordStores && Array.isArray(window.recordStores.live)) ? window.recordStores.live : [];
+            let list = [];
+            if (wanted === 'live') {
+                list = lives.map((item) => ({ item, kind: 'live' }));
+            } else if (wanted === 'upload') {
+                list = uploads.map((item) => ({ item, kind: 'upload' }));
+            } else {
+                // 合并展示：按采集时间升序（旧→新），没有时间戳的条目退化为各自数组内的原有顺序
+                const keyed = uploads.map((item, i) => ({ item, kind: 'upload', at: Number(item && item.data && (item.data.captured_at || item.data.timestamp)) || 0, i }))
+                    .concat(lives.map((item, i) => ({ item, kind: 'live', at: Number(item && item.data && (item.data.captured_at || item.data.timestamp)) || 0, i })));
+                keyed.sort((a, b) => (a.at - b.at) || (a.i - b.i));
+                list = keyed;
+            }
+
             tbody.innerHTML = '';
             if (!list.length) {
-                const emptyText = kind === 'live' ? '暂无实时抓包记录，启动后会只显示实时流量。' : '暂无上传检测记录，请上传文件开始检测';
-                tbody.innerHTML = `<tr class="border-b border-cyber-border/50"><td class="px-6 py-4 text-gray-500 text-center" colspan="8">${emptyText}</td></tr>`;
-                if (kind === 'live') window._liveSeen = new Set();
+                tbody.innerHTML = emptyStateRow(mode);
+                if (mode !== 'upload') window._liveSeen = new Set();
                 if (window.resultsImpl && typeof window.resultsImpl.applyRecordFilter === 'function') {
                     window.resultsImpl.applyRecordFilter(window.currentRecordFilter || 'all');
                 }
                 return;
             }
-            for (let i = list.length - 1; i >= 0; i--) {
-                const item = list[i] || {};
-                window.resultsImpl.addResultRow(item.name, item.size, item.time, item.data, Object.assign({}, item.options || {}, { recordKind: kind, forceRender: true, skipCache: true }));
+            // 旧→新逐条插入，而 addResultRow 是 prepend，最终最新的一条在表格顶部，
+            // 与运行期新行到达的顺序一致。
+            for (let i = 0; i < list.length; i++) {
+                const entry = list[i];
+                const item = entry.item || {};
+                window.resultsImpl.addResultRow(item.name, item.size, item.time, item.data, Object.assign({}, item.options || {}, { recordKind: entry.kind, forceRender: true, skipCache: true }));
             }
             if (window.resultsImpl && typeof window.resultsImpl.applyRecordFilter === 'function') {
                 window.resultsImpl.applyRecordFilter(window.currentRecordFilter || 'all');

@@ -1,4 +1,4 @@
-/* live record card behavior (size + scenario specific) */
+﻿/* live record card behavior (size + scenario specific) */
 (function(){
     window.liveRecordCardImpl = window.liveRecordCardImpl || {};
 
@@ -15,7 +15,6 @@
             if (panel) panel.style.minHeight = '520px';
             if (viewport) viewport.style.maxHeight = '620px';
 
-            window.recordTableMode = 'live';
             if (typeof window.renderRecordedRows === 'function') window.renderRecordedRows('live');
         } catch (e) {
             console.warn('liveRecordCardImpl.activate failed', e);
@@ -32,7 +31,7 @@
             } catch(e) { console.warn('liveRecordCardImpl.activate wrapper failed', e); }
             try {
                 if (typeof window.setPanelVisible === 'function') {
-                    window.setPanelVisible(panel, true, { enterTransform: 'translateX(28px) scale(0.985)' });
+                    window.setPanelVisible(panel, true);
                 } else if (panel) {
                     panel.classList.remove('hidden'); panel.style.opacity = '1'; panel.style.transform = '';
                 }
@@ -49,11 +48,11 @@
             if (!panel) return;
             try {
                 if (typeof window.setPanelVisible === 'function') {
-                    window.setPanelVisible(panel, false, { exitTransform: 'translateX(-28px) scale(0.985)' });
+                    window.setPanelVisible(panel, false);
                 } else {
                     panel.style.opacity = '0';
                     panel.style.pointerEvents = 'none';
-                    setTimeout(() => { panel.style.opacity = ''; panel.style.pointerEvents = ''; }, 320);
+                    setTimeout(() => { panel.style.opacity = ''; panel.style.pointerEvents = ''; }, 260);
                 }
             } catch(e) {}
         } catch (e) {

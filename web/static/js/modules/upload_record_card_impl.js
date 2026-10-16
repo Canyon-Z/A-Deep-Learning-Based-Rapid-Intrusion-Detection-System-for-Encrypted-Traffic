@@ -1,4 +1,4 @@
-/* upload record card behavior (size + scenario specific) */
+﻿/* upload record card behavior (size + scenario specific) */
 (function(){
     window.uploadRecordCardImpl = window.uploadRecordCardImpl || {};
 
@@ -15,13 +15,12 @@
             if (panel) panel.style.minHeight = '600px';
             if (viewport) viewport.style.maxHeight = '700px';
 
-            window.recordTableMode = 'upload';
             if (typeof window.renderRecordedRows === 'function') window.renderRecordedRows('upload');
 
             // ensure visible then run the micro-move animation to match top-card panels
             try {
                 if (typeof window.setPanelVisible === 'function') {
-                    window.setPanelVisible(panel, true, { enterTransform: 'translateX(28px) scale(0.985)' });
+                    window.setPanelVisible(panel, true);
                 } else if (panel) {
                     panel.classList.remove('hidden'); panel.style.opacity = '1'; panel.style.transform = '';
                 }
@@ -42,12 +41,12 @@
             if (!panel) return;
             try {
                 if (typeof window.setPanelVisible === 'function') {
-                    window.setPanelVisible(panel, false, { exitTransform: 'translateX(-28px) scale(0.985)' });
+                    window.setPanelVisible(panel, false);
                 } else if (typeof window.animateMovedElement === 'function') {
                     // quick fade out then restore
                     panel.style.opacity = '0';
                     panel.style.pointerEvents = 'none';
-                    setTimeout(() => { panel.style.opacity = ''; panel.style.pointerEvents = ''; }, 320);
+                    setTimeout(() => { panel.style.opacity = ''; panel.style.pointerEvents = ''; }, 260);
                 }
             } catch (e) {}
         } catch (e) {

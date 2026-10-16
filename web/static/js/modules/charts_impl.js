@@ -1,4 +1,13 @@
-/* implementations for charts and trend/pie state */
+/* implementations for charts and trend/pie state
+ *
+ * ⚠️ 这个文件目前【没有】被加载：main.js 的模块清单里没有它，全仓也没有任何地方调用 window.chartsImpl.*。
+ * 真正在跑的上传统计 / 趋势曲线 / 威胁分布饼图实现是 web/static/js/modules/upload_trend_impl.js。
+ * 保留它是为了不动历史产物，但改统计口径时请改 upload_trend_impl.js。
+ *
+ * 顺带记一个坑：本文件开头把 window.lineChart / window.pieChart 显式设为 null。未加载时这两个名字会被
+ * 浏览器按 HTML 命名元素访问解析成 <div id="lineChart"> / <div id="pieChart"> 元素本身，
+ * 于是 `window.pieChart.setOption(...)` 会以「不是函数」失败——取实例前必须校验 setOption/getOption。
+ */
 (function(){
     window.chartsImpl = window.chartsImpl || {};
 
@@ -34,28 +43,31 @@
 
     window.chartsImpl.initCharts = function() {
         try {
-            window.lineChart = echarts.init(document.getElementById('lineChart'));
+            window.lineChart = echarts.init(document.getElementById('lineChart'), window.DLIDS_CHART_THEME || null);
             const lineOption = {
                 backgroundColor: 'transparent',
                 tooltip: { trigger: 'axis' },
                 grid: { top: '15%', left: '5%', right: '5%', bottom: '10%', containLabel: true },
-                xAxis: { type: 'category', boundaryGap: false, data: window.trendLabels, axisLine: { lineStyle: { color: '#2A3447' } }, axisLabel: { color: '#64748B' } },
-                yAxis: { type: 'value', splitLine: { lineStyle: { color: '#2A3447', type: 'dashed' } }, axisLabel: { color: '#64748B' } },
+                xAxis: { type: 'category', boundaryGap: false, data: window.trendLabels, axisLine: { lineStyle: { color: '#222C3A' } }, axisLabel: { color: '#64748B' } },
+                yAxis: { type: 'value', splitLine: { lineStyle: { color: '#222C3A', type: 'dashed' } }, axisLabel: { color: '#64748B' } },
                 series: [
-                    { name: '正常流量', type: 'line', smooth: true, itemStyle: { color: '#00D084' }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(0, 208, 132, 0.3)' },{ offset: 1, color: 'rgba(0, 208, 132, 0)' }]) }, data: window.benignTrend },
-                    { name: '恶意流量', type: 'line', smooth: true, itemStyle: { color: '#FF2E63' }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(255, 46, 99, 0.3)' },{ offset: 1, color: 'rgba(255, 46, 99, 0)' }]) }, data: window.malwareTrend }
+                    { name: '正常流量', type: 'line', smooth: true, itemStyle: { color: '#10B981' }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(16, 185, 129, 0.3)' },{ offset: 1, color: 'rgba(16, 185, 129, 0)' }]) }, data: window.benignTrend },
+                    { name: '恶意流量', type: 'line', smooth: true, itemStyle: { color: '#F43F5E' }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(244, 63, 94, 0.3)' },{ offset: 1, color: 'rgba(244, 63, 94, 0)' }]) }, data: window.malwareTrend }
                 ]
             };
             window.lineChart.setOption(lineOption);
 
-            window.pieChart = echarts.init(document.getElementById('pieChart'));
+            window.pieChart = echarts.init(document.getElementById('pieChart'), window.DLIDS_CHART_THEME || null);
             const pieOption = {
                 backgroundColor: 'transparent',
                 tooltip: { trigger: 'item' },
-                legend: { bottom: '0%', textStyle: { color: '#94A3B8' }, icon: 'circle' },
-                series: [{ name: '威胁类型', type: 'pie', radius: ['40%', '70%'], avoidLabelOverlap: false, itemStyle: { borderRadius: 10, borderColor: '#151B2D', borderWidth: 2 }, label: { show: false, position: 'center' }, emphasis: { label: { show: true, fontSize: '18', fontWeight: 'bold', color: '#fff' } }, labelLine: { show: false }, data: [ { value: 0, name: 'Normal', itemStyle: { color: '#00D084' } }, { value: 0, name: 'Malware', itemStyle: { color: '#FF2E63' } } ] }]
+                title: { show: true, text: '暂无数据', left: 'center', top: 'middle', textStyle: { color: '#64748B', fontSize: 12, fontWeight: 'normal' } },
+                legend: { show: false, bottom: '0%', textStyle: { color: '#94A3B8' }, icon: 'circle' },
+                series: [{ name: '威胁类型', type: 'pie', radius: ['40%', '70%'], avoidLabelOverlap: false, stillShowZeroSum: false, emptyCircleStyle: { color: 'transparent', borderColor: 'transparent' }, itemStyle: { borderRadius: 10, borderColor: '#151C28', borderWidth: 2 }, label: { show: false }, emphasis: { label: { show: true, fontSize: '18', fontWeight: 'bold', color: '#fff' } }, labelLine: { show: false }, data: [] }]
             };
             window.pieChart.setOption(pieOption);
+            // 图表实例就绪后按统一口径渲染一次（记录恢复可能早于 initCharts）
+            if (window.dlidsRenderStats) window.dlidsRenderStats();
         } catch (e) { console.warn('chartsImpl.initCharts failed', e); }
     };
 
@@ -106,25 +118,13 @@
             window.totalScans = uploadRecords.length;
             window.malwareCount = malwareCount;
 
-            const normalCount = Math.max(0, window.totalScans - window.malwareCount);
-            const statTotal = document.getElementById('statTotal');
-            const statMal = document.getElementById('statMalware');
-            if (statTotal) statTotal.innerText = String(window.totalScans);
-            if (statMal) statMal.innerText = String(window.malwareCount);
+            // 恢复时重建上传这一路的口径；KPI 与饼图统一由 dlidsRenderStats 输出
+            if (window.dlidsStats) window.dlidsStats.upload = { total: uploadRecords.length, malware: malwareCount };
 
             if (window.lineChart) {
                 window.lineChart.setOption({ xAxis: { data: window.trendLabels }, series: [{ data: window.benignTrend }, { data: window.malwareTrend }] });
             }
-            if (window.pieChart) {
-                window.pieChart.setOption({
-                    series: [{
-                        data: [
-                            { value: normalCount, name: 'Normal', itemStyle: { color: '#00D084' } },
-                            { value: window.malwareCount, name: 'Malware', itemStyle: { color: '#FF2E63' } }
-                        ]
-                    }]
-                });
-            }
+            if (window.dlidsRenderStats) window.dlidsRenderStats();
         } catch (e) { console.warn('chartsImpl.restoreChartsFromRecords failed', e); }
     };
 
@@ -149,24 +149,14 @@
 
     window.chartsImpl.updateStats = function(data) {
         try {
-            window.totalScans = toSafeNumber(window.totalScans, 0) + 1;
-            window.malwareCount = toSafeNumber(window.malwareCount, 0);
             const isMal = (data && (String(data.status || '').includes('Malicious') || String(data.status || '').includes('Malware')));
-            if (isMal) window.malwareCount = (typeof window.malwareCount === 'number' ? window.malwareCount : 0) + 1;
-            const normalCount = Math.max(0, toSafeNumber(window.totalScans, 0) - toSafeNumber(window.malwareCount, 0));
-            const malwareCount = Math.max(0, toSafeNumber(window.malwareCount, 0));
-            const statTotal = document.getElementById('statTotal'); if (statTotal) statTotal.innerText = window.totalScans;
-            const statMal = document.getElementById('statMalware'); if (statMal) statMal.innerText = window.malwareCount;
-            if (window.pieChart) {
-                window.pieChart.setOption({
-                    series: [{
-                        data: [
-                            { value: normalCount, name: 'Normal', itemStyle: { color: '#00D084' } },
-                            { value: malwareCount, name: 'Malware', itemStyle: { color: '#FF2E63' } }
-                        ]
-                    }]
-                });
+            // 只累加「上传这一路」的口径，展示统一交给 dlidsRenderStats
+            if (window.dlidsStats) {
+                const up = window.dlidsStats.upload = window.dlidsStats.upload || { total: 0, malware: 0 };
+                up.total = (Number(up.total) || 0) + 1;
+                if (isMal) up.malware = (Number(up.malware) || 0) + 1;
             }
+            if (window.dlidsRenderStats) window.dlidsRenderStats();
             window.chartsImpl.updateTrendChart(isMal);
         } catch (e) { console.warn('chartsImpl.updateStats', e); }
     };
@@ -175,7 +165,7 @@
         try {
             const chartDom = document.getElementById('modalBarChart');
             if (!chartDom || typeof echarts === 'undefined') return;
-            if (!window.modalBarChart) window.modalBarChart = echarts.init(chartDom);
+            if (!window.modalBarChart) window.modalBarChart = echarts.init(chartDom, window.DLIDS_CHART_THEME || null);
             const labels = ['0x00','0x10','0x20','0x30','0x40','0x50','0x60','0x70','0x80','0x90','0xA0','0xB0','0xC0','0xD0','0xE0','0xF0'];
             let data = window.currentPayloadDist;
             if (!Array.isArray(data) || data.length !== 16) data = Array.from({ length: 16 }, () => 0);

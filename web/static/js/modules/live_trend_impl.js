@@ -18,9 +18,13 @@
     function ensureLineChart() {
         if (getLineChart()) return getLineChart();
         if (typeof echarts === 'undefined') return null;
+        // 拆成 5 个页面之后，折线图只出现在「总览」和「上传检测」页，而那两页的折线图画的是上传口径
+        // （uploadTrendImpl 在维护）。实时数据若也往同一张图上写，两个口径会互相覆盖 —— 用户在
+        // 上传页停留时趋势会因为后台抓包而跳变。实时页的主角是主机辐射图，本来就没有折线图。
+        if (!document.getElementById('liveFlowGraph')) return null;
         const dom = document.getElementById('lineChart');
         if (!dom) return null;
-        window.liveTrendChart = window.uploadTrendChart || echarts.init(dom);
+        window.liveTrendChart = window.uploadTrendChart || echarts.init(dom, window.DLIDS_CHART_THEME || null);
         return getLineChart();
     }
 

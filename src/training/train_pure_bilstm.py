@@ -10,29 +10,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from src.preprocessing.data_loader import get_dataloaders
 from src.training.train import train_model
 from src.training.loss_utils import build_criterion, compute_class_weights
+# 网络定义统一到 src/models/pure_bilstm.py（代码审查第 31 条：原先 3 份拷贝）
+from src.models.pure_bilstm import PureBiLSTM
 
-# 定义 PureBiLSTM 模型
-class PureBiLSTM(nn.Module):
-    def __init__(self, input_size=28, hidden_dim=64, num_layers=2, num_classes=2):
-        super(PureBiLSTM, self).__init__()
-        self.bilstm = nn.LSTM(input_size=input_size, hidden_size=hidden_dim, 
-                              num_layers=num_layers, batch_first=True, bidirectional=True, 
-                              dropout=0.5 if num_layers > 1 else 0)
-        self.dropout = nn.Dropout(0.5)
-        # BiLSTM output will be concatenated (hidden_dim * 2)
-        # Sequence length after flatten is image width (28)
-        self.fc = nn.Linear(hidden_dim * 2, num_classes)
-        
-    def forward(self, x):
-        # x shape: [batch, 1, 28, 28] -> remove channel dim -> [batch, 28, 28]
-        x = x.squeeze(1)
-        # lstm returns: output, (h_n, c_n)
-        output, _ = self.bilstm(x)
-        # use the last sequence state output[:, -1, :] 
-        last_state = output[:, -1, :]
-        last_state = self.dropout(last_state)
-        out = self.fc(last_state)
-        return out
 
 def main():
     parser = argparse.ArgumentParser(description="训练 Pure_BiLSTM 模型")

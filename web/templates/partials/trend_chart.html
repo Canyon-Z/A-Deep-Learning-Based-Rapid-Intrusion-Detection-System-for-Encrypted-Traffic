@@ -1,13 +1,19 @@
-<!-- Real-time Trend Chart -->
-<div id="trendChartPanel" class="glass-card rounded-xl p-6 h-[400px] flex flex-col">
-    <div class="flex justify-between items-center mb-4">
-        <h3 class="text-lg font-semibold text-white flex items-center gap-2">
-            <i class="fa-solid fa-wave-square text-cyber-primary"></i> 实时流量监测趋势
-        </h3>
-        <div class="flex gap-2">
-            <span class="flex items-center gap-1 text-xs text-gray-400"><span class="w-2 h-2 rounded-full bg-cyber-primary"></span> 正常流量</span>
-            <span class="flex items-center gap-1 text-xs text-gray-400"><span class="w-2 h-2 rounded-full bg-cyber-danger"></span> 恶意流量</span>
+<!-- Traffic Trend -->
+<div id="trendChartPanel" class="panel h-[360px] flex flex-col">
+    <div class="panel-head">
+        <h2 class="panel-title">
+            <i class="fa-solid fa-chart-line text-cyber-primary mr-2"></i>流量监测趋势
+        </h2>
+        <div class="flex items-center gap-4 text-xs text-gray-400">
+            <span class="flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-sm" style="background: var(--ds-accent);"></span>正常流量
+            </span>
+            <span class="flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-sm" style="background: var(--ds-danger);"></span>恶意流量
+            </span>
         </div>
     </div>
-    <div id="lineChart" class="flex-1 w-full"></div>
+    <div class="p-4 pt-1 flex-1 min-h-0">
+        <div id="lineChart" class="w-full h-full"></div>
+    </div>
 </div>

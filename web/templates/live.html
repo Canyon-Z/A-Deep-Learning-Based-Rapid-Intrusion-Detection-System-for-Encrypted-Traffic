@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="grid-12">
+    <div class="col-8">
+        {% include "partials/live_capture.html" %}
+    </div>
+    <div class="col-4">
+        {% include "partials/threat_chart.html" %}
+    </div>
+    <div class="col-12">
+        {% with result_title='实时抓包记录', result_hint='只记录本次会话中抓到的流量', result_mode='live', result_clear_label='清除日志' %}
+            {% include "partials/results_table.html" %}
+        {% endwith %}
+    </div>
+</div>
+{% endblock %}

@@ -1,22 +1,57 @@
 <!-- Upload Area -->
-<div id="dropZone" class="glass-card rounded-xl p-6 relative overflow-hidden group transition-all duration-300 hover:border-cyber-primary/50 hover:shadow-neon cursor-pointer">
-    <div class="scan-line"></div>
-    <input type="file" id="fileInput" class="hidden" accept=".pcap,.pcapng" multiple aria-label="上传 PCAP 文件" title="上传 PCAP 文件">
-
-    <div class="flex flex-col items-center justify-center py-8 text-center" id="uploadContent">
-        <div class="w-16 h-16 rounded-full bg-cyber-card border border-dashed border-cyber-border flex items-center justify-center text-3xl text-gray-500 mb-4 group-hover:text-cyber-primary group-hover:border-cyber-primary transition-colors">
-            <i class="fa-solid fa-cloud-upload-alt"></i>
-        </div>
-        <h3 class="text-lg font-semibold text-white mb-2">上传加密流量 (PCAP)</h3>
-        <p class="text-sm text-gray-400 mb-4">拖拽文件至此或点击上传，支持多选批量检测</p>
-        <button id="chooseFileBtn" type="button" class="px-6 py-2 bg-cyber-primary/10 text-cyber-primary border border-cyber-primary/30 rounded hover:bg-cyber-primary hover:text-black transition-all text-sm font-medium">选择文件</button>
-        <p class="text-xs text-gray-500 mt-4 font-mono">支持: .pcap, .pcapng (Max 500MB)</p>
+<div id="uploadPanel" class="panel">
+    <div class="panel-head">
+        <h2 class="panel-title">
+            <i class="fa-solid fa-cloud-arrow-up text-cyber-primary mr-2"></i>上传加密流量 (PCAP)
+        </h2>
     </div>
+    <div class="p-4">
+        <div id="dropZone"
+             class="glass-card relative overflow-hidden cursor-pointer flex flex-col items-center justify-center text-center px-5 py-8 min-h-[176px]">
+            <div class="scan-line"></div>
+            <input type="file" id="fileInput" class="hidden" accept=".pcap,.pcapng" multiple>
 
-    <!-- Loading State (Hidden by default) -->
-    <div id="loadingState" class="hidden flex flex-col items-center justify-center py-10">
-        <div class="w-12 h-12 border-2 border-cyber-primary border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p class="text-cyber-primary font-mono text-sm animate-pulse">正在分析流量特征...</p>
-        <p class="text-gray-500 text-xs mt-2" id="processStatus">提取 Session 中...</p>
+            <div id="uploadContent" class="flex flex-col items-center">
+                <span class="w-11 h-11 rounded-full flex items-center justify-center mb-3"
+                      style="background: var(--ds-accent-soft);">
+                    <i class="fa-solid fa-cloud-arrow-up text-[18px] text-cyber-primary"></i>
+                </span>
+                <p class="text-[15px] font-medium text-gray-100">拖拽文件到此处，或点击选择</p>
+                <p class="text-xs text-gray-500 mt-1.5 font-mono">.pcap / .pcapng &middot; 单个文件最大 500MB</p>
+                <button id="chooseFileBtn" class="btn btn-primary btn-sm mt-4">
+                    <i class="fa-solid fa-folder-open mr-1.5"></i>选择文件
+                </button>
+            </div>
+
+            <div id="loadingState" class="hidden flex flex-col items-center justify-center py-4 w-full">
+                <div class="w-7 h-7 border-2 border-cyber-border rounded-full animate-spin mb-3"
+                     style="border-top-color: var(--ds-accent);"></div>
+                <p class="text-sm text-gray-300">正在分析流量特征…</p>
+                <p id="processStatus" class="text-xs text-gray-500 mt-1.5 font-mono"></p>
+            </div>
+        </div>
+
+        <!-- 代码审查第 35 条：package_threshold / package_conf_threshold 原先是没有前端入口的
+             死接口面；这里给出可选入口，留空即沿用后端默认值。 -->
+        <details id="pkgThresholdBox" class="mt-3">
+            <summary class="text-xs text-gray-400 cursor-pointer select-none">包级判定阈值（可选，留空用默认）</summary>
+            <div class="mt-2 grid grid-cols-2 gap-2">
+                <label class="block">
+                    <span class="text-[11px] text-gray-500">恶意包占比阈值 0-1</span>
+                    <input id="pkgThresholdInput" type="number" min="0" max="1" step="0.01" placeholder="自动"
+                           class="w-full mt-1 rounded px-2 py-1 text-xs text-gray-200"
+                           style="background: var(--ds-bg); border: 1px solid var(--ds-border);">
+                </label>
+                <label class="block">
+                    <span class="text-[11px] text-gray-500">置信度阈值 0-1</span>
+                    <input id="pkgConfThresholdInput" type="number" min="0" max="1" step="0.01" placeholder="自动"
+                           class="w-full mt-1 rounded px-2 py-1 text-xs text-gray-200"
+                           style="background: var(--ds-bg); border: 1px solid var(--ds-border);">
+                </label>
+            </div>
+            <p class="text-[11px] text-gray-600 mt-1.5 leading-relaxed">
+                占比阈值决定包内恶意会话达到多少比例才把整包判为 Malware；置信度阈值用于筛掉低置信票。
+            </p>
+        </details>
     </div>
 </div>

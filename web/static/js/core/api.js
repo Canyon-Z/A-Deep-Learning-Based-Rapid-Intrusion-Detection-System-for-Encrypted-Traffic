@@ -37,9 +37,10 @@
         },
 
         async getModelMetrics() {
-            const response = await fetch('/static/checkpoints/model_metrics.json');
-            if (!response.ok) throw new Error('Failed to load metrics');
-            return response.json();
+            // 代码审查疑点 3：指标只有一份真源 —— 后端 /api/metrics 读的是
+            // checkpoints/model_metrics.json；这里不再直接取 /static 下的副本。
+            const body = await this.request('/api/metrics');
+            return (body && body.data) ? body.data : body;
         }
     };
 

@@ -6,6 +6,21 @@
     let modalBarChart = null;
     let currentPayloadDist = null;
 
+    // HTML 转义：优先复用 core/utils.js 的 Utils.escapeHtml（本文件在 core/utils.js 之前加载，
+    // 所以必须在调用时惰性查找，不能在建栈时缓存），未就绪时本地兜底。
+    // 任何把外部数据（IP / 端口 / 协议 / 模型名 / 状态文本等）拼进 innerHTML 的位置都必须先过这里。
+    function escapeHtml(value) {
+        if (value === null || value === undefined) return '';
+        if (window.Utils && typeof window.Utils.escapeHtml === 'function') return window.Utils.escapeHtml(value);
+        if (typeof window.escapeHtml === 'function' && window.escapeHtml !== escapeHtml) return window.escapeHtml(value);
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     function normalizeDetailPayload_impl(data) {
         const d = data && typeof data === 'object' ? data : {};
         return {
@@ -18,6 +33,10 @@
             imageData: d.imageData || d.image_data || d.image || d.visualization || d.visualization_data || '',
             payloadDist: d.payloadDist || d.payload_dist || d.payload_distribution || d.histogram || null,
             flows: Array.isArray(d.flows) ? d.flows : (Array.isArray(d.session_flows) ? d.session_flows : (Array.isArray(d.records) ? d.records : [])),
+            // 代码审查第 55 条：后端会把 flows 截断到 DLIDS_MAX_RESPONSE_FLOWS 条，
+            // 这里把「总数 / 是否被后端截断」一起带出来，明细表就不会谎报条数。
+            flowsTotal: Number.isFinite(Number(d.flows_total)) ? Number(d.flows_total) : (Array.isArray(d.flows) ? d.flows.length : 0),
+            flowsTruncated: !!d.flows_truncated,
             sessionParseReport: d.sessionParseReport || d.session_parse_report || d.parse_report || d.session_report || null,
         };
     }
@@ -136,7 +155,7 @@
     function initModalChart_impl() {
         const chartDom = document.getElementById('modalBarChart');
         if (!chartDom || typeof echarts === 'undefined') return;
-        if (!modalBarChart) modalBarChart = echarts.init(chartDom);
+        if (!modalBarChart) modalBarChart = echarts.init(chartDom, window.DLIDS_CHART_THEME || null);
         const labels = ['0x00','0x10','0x20','0x30','0x40','0x50','0x60','0x70','0x80','0x90','0xA0','0xB0','0xC0','0xD0','0xE0','0xF0'];
         let data = currentPayloadDist;
         if (!Array.isArray(data) || data.length !== 16) data = Array.from({ length: 16 }, () => 0);
@@ -166,6 +185,18 @@
                     glass.style.zIndex = 101;
                 }
             } catch (e) { console.warn('ensure modal pointer failed', e); }
+
+            // 一次性淡入（styles.css 的 .mo-in）。关闭时故意不做动画：
+            // 让"点关闭"立刻生效，比等一段淡出更跟手。
+            try {
+                const card = modal.querySelector('.glass-card');
+                if (card) {
+                    card.classList.remove('mo-in');
+                    void card.offsetWidth; // 强制重排，保证连续打开时动画能重播
+                    card.classList.add('mo-in');
+                    setTimeout(() => card.classList.remove('mo-in'), 300);
+                }
+            } catch (e) { /* 动画失败不影响弹窗功能 */ }
 
             const normalizedPayload = normalizeDetailPayload_impl({ name, statusText: result, conf, execTime, captureTime, imageData, payloadDist, flows, sessionParseReport });
 
@@ -247,7 +278,8 @@
 
             const isMalware = String(result || '').includes('Malware') || String(result || '').includes('Malicious');
             if (resultEl) {
-                resultEl.innerHTML = isMalware ? '<i class="fa-solid fa-bug"></i> ' + result : '<i class="fa-solid fa-shield-check"></i> ' + result;
+                // 状态文本可能来自后端/文件名，先转义再拼；<i> 图标标签是固定结构，保持原样。
+                resultEl.innerHTML = isMalware ? '<i class="fa-solid fa-bug"></i> ' + escapeHtml(result) : '<i class="fa-solid fa-shield-check"></i> ' + escapeHtml(result);
                 resultEl.className = isMalware
                     ? 'px-3 py-1.5 rounded bg-cyber-danger/10 text-cyber-danger border border-cyber-danger/50 text-sm font-bold shadow-neon-red flex items-center gap-2'
                     : 'px-3 py-1.5 rounded bg-cyber-success/10 text-cyber-success border border-cyber-success/50 text-sm font-bold shadow-[0_0_10px_rgba(0,208,132,0.2)] flex items-center gap-2';
@@ -268,7 +300,9 @@
                         flowCountEl.innerText = '0 Session';
                         flowTbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-gray-500 font-mono">No Flow Context Available</td></tr>';
                     } else {
-                        const totalFlows = list.length;
+                        const payloadTotal = Number(normalizedPayload && normalizedPayload.flowsTotal);
+                        const totalFlows = Math.max(list.length, Number.isFinite(payloadTotal) ? payloadTotal : 0);
+                        const serverTruncated = !!(normalizedPayload && normalizedPayload.flowsTruncated);
                         const renderCount = Math.min(totalFlows, MAX_FLOW_ROWS_RENDER);
                         const fragment = document.createDocumentFragment();
                         for (let i = 0; i < renderCount; i++) {
@@ -291,14 +325,16 @@
                                     const predicted = detail && detail.predicted_label ? detail.predicted_label : '-';
                                     const malConfRaw = detail && detail.malware_confidence ? parseFloat(detail.malware_confidence) : NaN;
                                     const malConfText = Number.isFinite(malConfRaw) ? `${(malConfRaw * 100).toFixed(1)}%` : '-';
-                                    return `<div>${modelName}: ${predicted} (${malConfText})</div>`;
+                                    return `<div>${escapeHtml(modelName)}: ${escapeHtml(predicted)} (${malConfText})</div>`;
                                 }).join('');
                                 voteDetailHtml = `<div class="text-[10px] text-cyan-300 mt-1">投票明细:${voteLines}</div>`;
                             }
                             const flowStatusHtml = isMal
                                 ? `<span class="text-cyber-danger font-medium"><i class="fa-solid fa-triangle-exclamation"></i> Malware (${malwareVal}%)</span>`
                                 : `<span class="text-cyber-success font-medium"><i class="fa-solid fa-check"></i> Benign</span>`;
-                            tr.innerHTML = `\n                                <td class="px-3 py-2 font-mono">${flow.src_ip || flow.src || '-'}:${flow.src_port || flow.sport || '-'}</td>\n                                <td class="px-3 py-2 font-mono">${flow.dst_ip || flow.dst || '-'}:${flow.dst_port || flow.dport || '-'}</td>\n                                <td class="px-3 py-2 text-cyber-primary">${flow.protocol || '-'}</td>\n                                <td class="px-3 py-2 font-mono text-gray-400">${flow.bytes || flow.length || 0} B</td>\n                                <td class="px-3 py-2">${flowStatusHtml}<div class="text-[10px] text-gray-500 mt-1">Pred: ${labelText} (${predictedVal}%)</div>${voteDetailHtml}</td>\n                            `;
+                            // 抓包内容（src/dst IP、端口、协议、字节数、预测标签）全部先 escapeHtml；
+                            // flowStatusHtml / voteDetailHtml 是已转义好的 HTML 片段，不能再整体转义。
+                            tr.innerHTML = `\n                                <td class="px-3 py-2 font-mono">${escapeHtml(flow.src_ip || flow.src || '-')}:${escapeHtml(flow.src_port || flow.sport || '-')}</td>\n                                <td class="px-3 py-2 font-mono">${escapeHtml(flow.dst_ip || flow.dst || '-')}:${escapeHtml(flow.dst_port || flow.dport || '-')}</td>\n                                <td class="px-3 py-2 text-cyber-primary">${escapeHtml(flow.protocol || '-')}</td>\n                                <td class="px-3 py-2 font-mono text-gray-400">${escapeHtml(flow.bytes || flow.length || 0)} B</td>\n                                <td class="px-3 py-2">${flowStatusHtml}<div class="text-[10px] text-gray-500 mt-1">Pred: ${escapeHtml(labelText)} (${predictedVal}%)</div>${voteDetailHtml}</td>\n                            `;
                             fragment.appendChild(tr);
                         }
                         flowTbody.appendChild(fragment);
@@ -306,6 +342,11 @@
                             const more = document.createElement('tr');
                             more.innerHTML = `<td colspan="5" class="text-center py-3 text-xs text-gray-500 font-mono">仅展示前 ${renderCount} / ${totalFlows} 条会话，已自动截断以提升交互性能</td>`;
                             flowTbody.appendChild(more);
+                        }
+                        if (serverTruncated) {
+                            const note = document.createElement('tr');
+                            note.innerHTML = `<td colspan="5" class="text-center py-3 text-xs text-gray-500 font-mono">后端仅回传前 ${list.length} / ${totalFlows} 条会话明细（上限见 DLIDS_MAX_RESPONSE_FLOWS）</td>`;
+                            flowTbody.appendChild(note);
                         }
                         flowCountEl.innerText = `${totalFlows} Sessions Found`;
                     }
@@ -329,6 +370,7 @@
     window.modalHelpers.buildFallbackSessionReport = buildFallbackSessionReport;
     window.modalHelpers.buildDetailVisualizationDataUri = buildDetailVisualizationDataUri;
     window.modalHelpers.escapeSvgText = escapeSvgText;
+    window.modalHelpers.escapeHtml = escapeHtml;
     window.modalHelpers.initModalChart = initModalChart_impl;
     window.modalHelpers.showDetails = showDetails_impl;
     // global helper to close the details modal (used by inline onclick handlers in template)

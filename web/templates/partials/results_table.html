@@ -1,39 +1,52 @@
-<!-- Recent Detections List -->
-<div id="resultCardPanel" class="glass-card rounded-xl overflow-hidden min-h-[600px]">
-    <div class="px-4 py-3 border-b border-cyber-border bg-cyber-card/50 flex justify-between items-center">
-        <h3 id="resultTableTitle" class="text-lg font-semibold text-white flex items-center gap-2">
-            <i class="fa-solid fa-list-ul text-cyber-primary"></i> 实时抓包记录
-        </h3>
-        <span id="resultTableHint" class="hidden lg:inline text-xs text-gray-500 ml-2">仅记录当前实时抓包会话</span>
+{% set rt_title = result_title | default('上传检测记录') %}
+{% set rt_hint = result_hint | default('只记录上传文件的结果') %}
+{% set rt_mode = result_mode | default('upload') %}
+{% set rt_clear = result_clear_label | default('清除日志') %}
+<!-- Detection Records
+     同一个 partial 在 4 个页面复用，差异全部由调用方通过 result_title / result_hint /
+     result_mode / result_clear_label 传入。mode=all 时表格多一列「来源」。 -->
+<div id="resultCardPanel" data-mode="{{ rt_mode }}" class="panel overflow-hidden flex flex-col min-h-[420px]">
+    <div class="panel-head flex-wrap gap-y-2">
+        <div class="flex items-center gap-2.5 min-w-0">
+            <h2 class="panel-title">
+                <i class="fa-solid fa-list-ul text-cyber-primary mr-2"></i><span id="resultTableTitle">{{ rt_title }}</span>
+            </h2>
+            <span id="resultTableHint" class="panel-hint hidden lg:inline">{{ rt_hint }}</span>
+        </div>
         <div class="flex items-center gap-2">
-            <div class="flex items-center gap-1 rounded-full bg-black/20 border border-cyber-border p-1">
-                <button id="recordFilterAll" type="button" class="record-filter-btn px-3 py-1 rounded-full text-xs bg-cyber-primary text-black">全部</button>
-                <button id="recordFilterBenign" type="button" class="record-filter-btn px-3 py-1 rounded-full text-xs text-gray-300 hover:text-white">Benign</button>
-                <button id="recordFilterMalware" type="button" class="record-filter-btn px-3 py-1 rounded-full text-xs text-gray-300 hover:text-white">Malware</button>
-            </div>
-            <button id="clearUploadLogsBtn" type="button" class="text-xs text-gray-400 hover:text-white transition-colors"><i class="fa-solid fa-trash"></i> 清除日志</button>
-            <button id="refreshBtn" type="button" class="text-xs text-gray-400 hover:text-white transition-colors"><i class="fa-solid fa-rotate-right"></i> 刷新</button>
+            <button id="recordFilterAll" class="filter-chip record-filter-btn bg-cyber-primary">全部</button>
+            <button id="recordFilterBenign" class="filter-chip record-filter-btn">Benign</button>
+            <button id="recordFilterMalware" class="filter-chip record-filter-btn">Malware</button>
+            <span class="w-px h-4 bg-cyber-border mx-1"></span>
+            <button id="clearUploadLogsBtn" class="btn btn-ghost btn-sm">
+                <i class="fa-solid fa-eraser mr-1.5"></i>{{ rt_clear }}
+            </button>
+            <button id="refreshBtn" class="btn btn-ghost btn-sm">
+                <i class="fa-solid fa-rotate-right mr-1.5"></i>刷新
+            </button>
         </div>
     </div>
-
-    <div id="resultTableViewport" class="overflow-auto max-h-[700px]">
-        <table class="w-full text-left border-collapse">
+    <div id="resultTableViewport" class="overflow-auto flex-1" style="max-height: 640px;">
+        <table class="data-table">
             <thead>
-                <tr class="text-xs text-gray-500 bg-cyber-card border-b border-cyber-border sticky top-0 z-10">
-                    <th class="px-4 py-2.5 font-medium">文件名</th>
-                    <th class="px-4 py-2.5 font-medium">检测时间</th>
-                    <th class="px-4 py-2.5 font-medium">耗时</th>
-                    <th class="px-4 py-2.5 font-medium">大小</th>
-                    <th class="px-4 py-2.5 font-medium">结果</th>
-                    <th class="px-4 py-2.5 font-medium">模型</th>
-                    <th class="px-4 py-2.5 font-medium">置信度</th>
-                    <th class="px-4 py-2.5 font-medium">操作</th>
+                <tr>
+                    <th>文件名</th>
+                    {% if rt_mode == 'all' %}<th>来源</th>{% endif %}
+                    <th>检测时间</th>
+                    <th>耗时</th>
+                    <th>大小</th>
+                    <th>结果</th>
+                    <th>模型</th>
+                    <th>置信度</th>
+                    <th class="text-right">操作</th>
                 </tr>
             </thead>
-            <tbody id="resultTableBody" class="text-sm text-gray-300">
-                <!-- JS will populate rows here -->
-                <tr class="border-b border-cyber-border/50 hover:bg-cyber-card/30 transition-colors">
-                    <td class="px-6 py-4 font-mono text-gray-500 text-center" colspan="8">暂无检测记录，请上传文件开始检测</td>
+            <tbody id="resultTableBody">
+                <tr>
+                    <td colspan="{% if rt_mode == 'all' %}9{% else %}8{% endif %}" class="text-center text-gray-500 py-12">
+                        <i class="fa-regular fa-folder-open block text-2xl mb-2 text-gray-600"></i>
+                        {% if rt_mode == 'live' %}暂无实时抓包记录，启动后会只显示实时流量。{% elif rt_mode == 'all' %}暂无检测记录，上传文件或开始抓包后这里会出现记录。{% else %}暂无检测记录，请上传文件开始检测{% endif %}
+                    </td>
                 </tr>
             </tbody>
         </table>

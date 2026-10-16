@@ -61,6 +61,20 @@
             return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
         },
 
+        // HTML 转义：把 & < > " ' 转成实体。
+        // 任何"把外部数据（文件名 / IP / 协议 / 模型名等）拼进 innerHTML 或 HTML 属性"的位置，
+        // 都必须先经过这里，避免被构造成 <img src=x onerror=...> 之类的存储型 XSS。
+        // 注意：只转义插值数据，不要用在拼好的 HTML 片段上（否则标签会被转成文本）。
+        escapeHtml(value) {
+            if (value === null || value === undefined) return '';
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        },
+
         generateSessionId(src, sport, dst, dport, proto) {
             if (src <= dst) return `${src}:${sport}->${dst}:${dport}:${proto}`;
             return `${dst}:${dport}->${src}:${sport}:${proto}`;
@@ -68,4 +82,6 @@
     };
 
     window.Utils = Utils;
+    // 便捷别名：其他脚本（modal.js / results_impl.js 等）可直接调用 window.escapeHtml(...)
+    window.escapeHtml = Utils.escapeHtml;
 })();
