@@ -1362,16 +1362,18 @@ MAX_RECENT = 50
 live_debug_logs = []
 MAX_DEBUG_LOGS = 300
 
-# 流级聚合参数：过去每抓到一个包就单独跑一次模型推理，一次浏览网页就能产生上万次推理；
-# 现在按五元组把包攒成"流"，攒够包数或字节数才推理一次。
-LIVE_SESSION_MAX_BYTES = _env_int('DLIDS_LIVE_SESSION_MAX_BYTES', 4096, 64)
+# 实时抓包的流级聚合参数。
+# 训练和离线链路都是取会话前 28 个包、每包前 28 字节（MAC/IP 已抹）拼 28x28 图，
+# 实时这边得照同样的规则攒包，不然喂进模型的跟训练时不是一回事。
+# 攒够 28 个包（正好一张图）就推理；攒不满的等空闲超时或停止抓包时补零提交。
+LIVE_SESSION_PACKETS = _env_int('DLIDS_LIVE_SESSION_PACKETS', 28, 1)
 LIVE_SESSION_MIN_PACKETS = _env_int('DLIDS_LIVE_SESSION_MIN_PACKETS', 8, 1)
 LIVE_MAX_TRACKED_SESSIONS = _env_int('DLIDS_LIVE_MAX_SESSIONS', 256, 1)
-LIVE_SESSION_IDLE_SECONDS = _env_float('DLIDS_LIVE_SESSION_IDLE', 10.0, 0.5, 600.0)
+LIVE_SESSION_IDLE_SECONDS = _env_float('DLIDS_LIVE_SESSION_IDLE', 5.0, 0.5, 600.0)
 
 # 单调递增的流 id：前端用它做增量拉取（since_id），避免每轮重传全部缩略图
 latest_flow_id = 0
-live_session_buffers: dict = {}   # 五元组 -> {'data': bytearray, 'packets': int, 'updated': float}
+live_session_buffers: dict = {}   # 五元组 -> {'pkts': [bytes(28)], 'packets': int, 'bytes': int, 'updated': float, 'meta': dict}
 
 # 特征提取器与张量变换只创建一次（原来是每个包都新建一个 FeatureExtractor）
 live_extractor = None
@@ -1493,169 +1495,223 @@ def start_live_capture(iface: str = Form(...), model_type: str = Form(ENSEMBLE_M
         # 尽力而为，清理失败不影响启动
         pass
 
+    def _parse_frame(raw):
+        """从以太网帧里取五元组和 IP 头偏移，规则跟 feature_extraction 那段一样。
+
+        返回 (src, sport, dst, dport, proto, offset)；非 IPv4 或太短的帧返回 None。
+        """
+        if len(raw) < 34:
+            return None
+        eth_type = (raw[12] << 8) | raw[13]
+        offset = 14
+        if eth_type == 0x8100:                       # VLAN 标签
+            if len(raw) < 38:
+                return None
+            eth_type = (raw[16] << 8) | raw[17]
+            offset = 18
+        if eth_type != 0x0800:                       # 只处理 IPv4
+            return None
+        if offset + 20 > len(raw):
+            return None
+        ip_hl = (raw[offset] & 0x0F) * 4
+        proto = raw[offset + 9]
+        src = '%d.%d.%d.%d' % tuple(raw[offset + 12:offset + 16])
+        dst = '%d.%d.%d.%d' % tuple(raw[offset + 16:offset + 20])
+        sport = 0
+        dport = 0
+        if proto in (6, 17):
+            t = offset + ip_hl
+            if len(raw) >= t + 4:
+                sport = (raw[t] << 8) | raw[t + 1]
+                dport = (raw[t + 2] << 8) | raw[t + 3]
+        return src, sport, dst, dport, proto, offset
+
+    def _infer_and_append(pkts, meta, raw_bytes, requested_model_type):
+        """把攒够的会话送进模型，结果写进最近缓冲。
+
+        pkts 是每包 28 字节的列表，转成 tuple 后 process_session 才会按"每包一行"填图。
+        """
+        extractor = _get_live_extractor()
+        try:
+            img_arr = extractor.process_session(tuple(pkts))
+            img_arr = np.ascontiguousarray(img_arr, dtype=np.uint8)
+        except Exception:
+            try:
+                live_debug_logs.append('[live] process_session failed, pkts=%d' % len(pkts))
+                if len(live_debug_logs) > MAX_DEBUG_LOGS:
+                    live_debug_logs.pop(0)
+            except Exception:
+                pass
+            return
+
+        image_b64 = None
+        payload_hist = None
+        try:
+            hist, _ = np.histogram(img_arr.flatten(), bins=16, range=(0, 256))
+            payload_hist = hist.tolist()
+            pil_img = Image.fromarray(img_arr)
+            resample_nearest = getattr(Resampling, 'NEAREST', 0)
+            display_img = pil_img.resize((140, 140), resample_nearest)
+            buffered = io.BytesIO()
+            display_img.save(buffered, format="PNG")
+            image_b64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        except Exception:
+            try:
+                live_debug_logs.append('[live] build image/histogram failed')
+                if len(live_debug_logs) > MAX_DEBUG_LOGS:
+                    live_debug_logs.pop(0)
+            except Exception:
+                pass
+
+        img = Image.fromarray(img_arr)
+        tensor_img = live_transform(img)
+        if not isinstance(tensor_img, torch.Tensor):
+            return
+        tensor = torch.unsqueeze(tensor_img, 0).to(device)
+
+        requested = str(requested_model_type or '').strip().lower()
+        run_ensemble = requested in ('', ENSEMBLE_MODEL_TYPE)
+        vote_result = None
+
+        if run_ensemble:
+            with torch.no_grad():
+                ensemble_result = _vote_with_ensemble(tensor)
+                vote_result = ensemble_result['session_votes'][0]
+                confs = vote_result['malware_confidences']
+                malware_conf = float(np.mean(confs)) if confs else 0.0
+                is_malicious = vote_result['predicted_label'] == 'Malicious'
+        else:
+            selected_model = models.get(requested)
+            if selected_model is None:
+                return
+            threshold = MODEL_MALWARE_THRESHOLDS.get(requested, DEFAULT_MALWARE_THRESHOLD)
+            malware_idx = _find_class_index(['malware', 'malicious'],
+                                            default_index=1 if len(class_names) > 1 else 0)
+            with torch.no_grad():
+                probs = _predict_model_probabilities(selected_model, tensor)
+                if probs is None:
+                    return
+                session_probs = probs[0]
+                malware_conf = (float(session_probs[malware_idx].item())
+                                if malware_idx < session_probs.shape[0] else 0.0)
+                is_malicious = malware_conf >= threshold
+
+        flow = {
+            'src': meta.get('src'),
+            'dst': meta.get('dst'),
+            'sport': meta.get('sport'),
+            'dport': meta.get('dport'),
+            'proto': meta.get('proto'),
+            'packets': len(pkts),
+            'bytes': int(raw_bytes or 0),
+            'malware_conf': round(malware_conf, 4),
+            'is_malicious': bool(is_malicious),
+            'model_type': ENSEMBLE_MODEL_TYPE if run_ensemble else requested,
+            'model_name': MODEL_DISPLAY_NAMES.get(
+                ENSEMBLE_MODEL_TYPE if run_ensemble else requested,
+                ENSEMBLE_MODEL_TYPE if run_ensemble else requested),
+            'captured_at': time.time(),
+            # 附上可视化和直方图，与文件上传分析的输出格式一致
+            'image_data': image_b64,
+            'payload_dist': payload_hist,
+        }
+
+        if vote_result is not None:
+            flow['vote_summary'] = {
+                'malware_votes': vote_result['malware_votes'],
+                'benign_votes': vote_result['benign_votes'],
+                'vote_ratio': round(float(vote_result['vote_ratio']), 4),
+                'model_votes': vote_result['model_votes'],
+            }
+
+        if is_malicious:
+            capture_stats['malware_count'] += 1
+        _append_recent(flow)
+        capture_stats['last_update'] = time.time()
+        try:
+            live_debug_logs.append(
+                '[live] flow %s:%s -> %s:%s pkts=%d malicious=%s conf=%s'
+                % (flow['src'], flow['sport'], flow['dst'], flow['dport'],
+                   flow['packets'], flow['is_malicious'], flow['malware_conf']))
+            if len(live_debug_logs) > MAX_DEBUG_LOGS:
+                live_debug_logs.pop(0)
+        except Exception:
+            pass
+
+    def _sweep_sessions(force=False):
+        """空闲或停止抓包时，把攒不满 28 包的会话按现有包数补零提交。
+
+        force=True 用于停止时清空残留；包数不够下限的直接丢掉，免得噪声会话进列表。
+        """
+        now_ts = time.time()
+        ready = []
+        with capture_lock:
+            for key in list(live_session_buffers.keys()):
+                s = live_session_buffers[key]
+                if s['packets'] < LIVE_SESSION_MIN_PACKETS:
+                    if force:
+                        live_session_buffers.pop(key, None)
+                    continue
+                if force or (now_ts - s['updated']) >= LIVE_SESSION_IDLE_SECONDS:
+                    ready.append((list(s['pkts']), dict(s['meta']), s['bytes']))
+                    live_session_buffers.pop(key, None)
+        for pkts, meta, raw_bytes in ready:
+            _infer_and_append(pkts, meta, raw_bytes, model_type)
+
     def packet_handler(pkt):
         try:
             capture_stats['total_packets'] += 1
-            try:
-                msg = f"[live] pkt #{capture_stats['total_packets']} received, len={len(bytes(pkt))}"
-                live_debug_logs.append(msg)
-                if len(live_debug_logs) > MAX_DEBUG_LOGS: live_debug_logs.pop(0)
-                print(msg)
-            except Exception:
-                pass
-            # 尽力提取五元组
-            src = pkt[IP].src if IP is not None and IP in pkt else '0.0.0.0'
-            dst = pkt[IP].dst if IP is not None and IP in pkt else '0.0.0.0'
-            proto = None
-            sport = None
-            dport = None
-            if TCP is not None and TCP in pkt:
-                proto = 6
-                sport = pkt[TCP].sport
-                dport = pkt[TCP].dport
-            elif UDP is not None and UDP in pkt:
-                proto = 17
-                sport = pkt[UDP].sport
-                dport = pkt[UDP].dport
-            else:
-                proto = int(pkt.proto) if hasattr(pkt, 'proto') else 0
-
             raw = bytes(pkt)
-
-            # ---- 流级聚合（严重 6 修正）：按五元组把包攒成一条流，攒够才推理 ----
-            session_key = (src, sport, dst, dport, proto)
-            now_ts = time.time()
-            session = live_session_buffers.get(session_key)
-            if session is None:
-                # 会话表过大时丢弃最旧的条目，避免长时间抓包导致内存持续增长
-                if len(live_session_buffers) >= LIVE_MAX_TRACKED_SESSIONS:
-                    oldest_key = min(live_session_buffers, key=lambda k: live_session_buffers[k]['updated'])
-                    live_session_buffers.pop(oldest_key, None)
-                session = {'data': bytearray(), 'packets': 0, 'updated': now_ts}
-                live_session_buffers[session_key] = session
-
-            session['data'].extend(raw)
-            session['packets'] += 1
-            session['updated'] = now_ts
-
-            enough_packets = session['packets'] >= LIVE_SESSION_MIN_PACKETS
-            enough_bytes = len(session['data']) >= LIVE_SESSION_MAX_BYTES
-            if not (enough_packets or enough_bytes):
-                # 这条流还没攒够，等后面的包；此处直接返回，避免每包一次模型推理
+            parsed = _parse_frame(raw)
+            if parsed is None:
                 return
-            if len(session['data']) > LIVE_SESSION_MAX_BYTES * 2:
-                session['data'] = session['data'][-LIVE_SESSION_MAX_BYTES:]
+            src, sport, dst, dport, proto, offset = parsed
 
-            flow_bytes = bytes(session['data'])
-            session['data'] = bytearray()
-            session['packets'] = 0
-
-            # 用 FeatureExtractor 把数据流转成图片
-            extractor = _get_live_extractor()
-            try:
-                img_arr = extractor.process_session(flow_bytes)
-                # 代码审查第 36 条：同上，先规整成 uint8 再交给 Pillow。
-                img_arr = np.ascontiguousarray(img_arr, dtype=np.uint8)
-            except Exception:
-                # 记录处理错误便于调试
-                try:
-                    msg = f"[live] FeatureExtractor.process_session failed, pkt_len={len(raw)}"
-                    live_debug_logs.append(msg)
-                    if len(live_debug_logs) > MAX_DEBUG_LOGS: live_debug_logs.pop(0)
-                    print(msg)
-                except Exception:
-                    pass
-                return
-
-            # 准备张量输入模型，同时生成缩略图和载荷直方图
-            image_b64 = None
-            payload_hist = None
-            try:
-                hist, _ = np.histogram(img_arr.flatten(), bins=16, range=(0, 256))
-                payload_hist = hist.tolist()
-                pil_img = Image.fromarray(img_arr)
-                resample_nearest = getattr(Resampling, 'NEAREST', 0)
-                display_img = pil_img.resize((140, 140), resample_nearest)
-                buffered = io.BytesIO()
-                display_img.save(buffered, format="PNG")
-                image_b64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-            except Exception:
-                # 尽力而为，可视化失败不影响主流程
-                try:
-                    live_debug_logs.append('[live] failed to build image/ histogram for pkt')
-                    if len(live_debug_logs) > MAX_DEBUG_LOGS: live_debug_logs.pop(0)
-                except Exception:
-                    pass
-            img = Image.fromarray(img_arr)
-            tensor_img = live_transform(img)
-            if not isinstance(tensor_img, torch.Tensor):
-                return
-            tensor = torch.unsqueeze(tensor_img, 0).to(device)
-            requested_model_type = str(model_type or '').strip().lower()
-            run_ensemble = requested_model_type in ('', ENSEMBLE_MODEL_TYPE)
-            vote_result = None
-
-            if run_ensemble:
-                with torch.no_grad():
-                    ensemble_result = _vote_with_ensemble(tensor)
-                    vote_result = ensemble_result['session_votes'][0]
-                    malware_conf = float(np.mean(vote_result['malware_confidences'])) if vote_result['malware_confidences'] else 0.0
-                    is_malicious = vote_result['predicted_label'] == 'Malicious'
+            # 上下行并成一条会话，键里 IP 小的放前面，跟离线那边一致
+            if src <= dst:
+                session_key = (src, sport, dst, dport, proto)
             else:
-                selected_model = models.get(requested_model_type)
-                if selected_model is None:
-                    return
-                malware_idx = _find_class_index(['malware', 'malicious'], default_index=1 if len(class_names) > 1 else 0)
-                threshold = MODEL_MALWARE_THRESHOLDS.get(requested_model_type, DEFAULT_MALWARE_THRESHOLD)
-                with torch.no_grad():
-                    probs = _predict_model_probabilities(selected_model, tensor)
-                    if probs is None:
-                        return
-                    session_probs = probs[0]
-                    malware_conf = float(session_probs[malware_idx].item()) if malware_idx < session_probs.shape[0] else 0.0
-                    is_malicious = malware_conf >= threshold
+                session_key = (dst, dport, src, sport, proto)
 
-            flow = {
-                'src': src,
-                'dst': dst,
-                'sport': sport,
-                'dport': dport,
-                'proto': proto,
-                'malware_conf': round(malware_conf, 4),
-                'is_malicious': bool(is_malicious),
-                'model_type': ENSEMBLE_MODEL_TYPE if run_ensemble else requested_model_type,
-                'model_name': MODEL_DISPLAY_NAMES.get(ENSEMBLE_MODEL_TYPE if run_ensemble else requested_model_type, ENSEMBLE_MODEL_TYPE if run_ensemble else requested_model_type),
-                'captured_at': time.time(),
-                # 附上可视化和直方图，与文件上传分析的输出格式一致
-                'image_data': image_b64,
-                'payload_dist': payload_hist
-            }
+            extractor = _get_live_extractor()
+            now_ts = time.time()
+            snapshot = None
+            with capture_lock:
+                session = live_session_buffers.get(session_key)
+                if session is None:
+                    # 会话表过大时丢弃最旧的条目，避免长时间抓包导致内存持续增长
+                    if len(live_session_buffers) >= LIVE_MAX_TRACKED_SESSIONS:
+                        oldest_key = min(live_session_buffers,
+                                         key=lambda k: live_session_buffers[k]['updated'])
+                        live_session_buffers.pop(oldest_key, None)
+                    session = {'pkts': [], 'packets': 0, 'bytes': 0,
+                               'updated': now_ts,
+                               'meta': {'src': src, 'sport': sport, 'dst': dst,
+                                        'dport': dport, 'proto': proto}}
+                    live_session_buffers[session_key] = session
 
-            if vote_result is not None:
-                flow['vote_summary'] = {
-                    'malware_votes': vote_result['malware_votes'],
-                    'benign_votes': vote_result['benign_votes'],
-                    'vote_ratio': round(float(vote_result['vote_ratio']), 4),
-                    'model_votes': vote_result['model_votes'],
-                }
+                # 每包存掩码后的前 28 字节。掩码直接调离线那个方法，
+                # 两边字节才会完全一样，不然又会跑偏。
+                masked = extractor._mask_packet_headers(bytearray(raw), offset)
+                session['pkts'].append(bytes(masked[:extractor.bytes_per_packet]))
+                session['packets'] += 1
+                session['bytes'] += len(raw)
+                session['updated'] = now_ts
 
-            if is_malicious:
-                capture_stats['malware_count'] += 1
-            _append_recent(flow)
-            try:
-                msg = f"[live] appended flow src={src} dst={dst} proto={proto} malicious={is_malicious} conf={flow.get('malware_conf')}"
-                live_debug_logs.append(msg)
-                if len(live_debug_logs) > MAX_DEBUG_LOGS: live_debug_logs.pop(0)
-                print(msg)
-            except Exception:
-                pass
-            capture_stats['last_update'] = time.time()
+                if session['packets'] >= LIVE_SESSION_PACKETS:
+                    snapshot = (list(session['pkts']), dict(session['meta']),
+                                session['bytes'])
+                    live_session_buffers.pop(session_key, None)
+
+            if snapshot is not None:
+                _infer_and_append(snapshot[0], snapshot[1], snapshot[2], model_type)
         except Exception:
             try:
                 import traceback
                 msg = '[live] packet_handler exception: ' + traceback.format_exc()
                 live_debug_logs.append(msg)
-                if len(live_debug_logs) > MAX_DEBUG_LOGS: live_debug_logs.pop(0)
+                if len(live_debug_logs) > MAX_DEBUG_LOGS:
+                    live_debug_logs.pop(0)
                 print(msg)
             except Exception:
                 pass
@@ -1672,6 +1728,8 @@ def start_live_capture(iface: str = Form(...), model_type: str = Form(ENSEMBLE_M
                 try:
                     # 用短超时让循环能频繁检查 stop_event
                     sniff(iface=capture_iface, prn=packet_handler, store=False, timeout=1)
+                    # 每轮结束后把空闲会话补算掉，避免短会话一直等不到第 28 个包
+                    _sweep_sessions()
                 except Exception as e:
                     capture_stats['last_error'] = str(e)
                     print('Live capture error during sniff:', e)
@@ -1681,6 +1739,11 @@ def start_live_capture(iface: str = Form(...), model_type: str = Form(ENSEMBLE_M
             print('Live capture error:', e)
         finally:
             capture_stats['running'] = False
+            # 停止前把没攒满的会话也判掉，别丢最后几条
+            try:
+                _sweep_sessions(force=True)
+            except Exception:
+                pass
             # 清理全局状态，让后续的 start/stop 调用看到正确状态
             try:
                 with capture_lock:

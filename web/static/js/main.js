@@ -483,6 +483,36 @@
         if (elements.chooseFileBtn) {
             elements.chooseFileBtn.onclick = () => document.getElementById('fileInput')?.click();
         }
+
+        // 上传区拖拽。页面上写着"拖拽文件到此处"，但之前只绑了"选择文件"按钮，
+        // 拖进去没反应。注意 accept=".pcap,.pcapng" 只过滤文件选择框，拖拽不受限制，
+        // 所以拖入非 pcap 文件会走后端 400 校验，界面能给出提示。
+        const dropZoneEl = document.getElementById('dropZone');
+        if (dropZoneEl) {
+            const HILITE = 'var(--ds-accent)';
+            const clearDrag = () => { dropZoneEl.style.outline = ''; dropZoneEl.style.outlineOffset = ''; };
+            const showDrag = () => { dropZoneEl.style.outline = '2px dashed ' + HILITE; dropZoneEl.style.outlineOffset = '-6px'; };
+            dropZoneEl.addEventListener('dragenter', (e) => { e.preventDefault(); showDrag(); });
+            dropZoneEl.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+                showDrag();
+            });
+            dropZoneEl.addEventListener('dragleave', (e) => {
+                if (!dropZoneEl.contains(e.relatedTarget)) clearDrag();
+            });
+            dropZoneEl.addEventListener('drop', (e) => {
+                e.preventDefault();
+                clearDrag();
+                const dropped = e.dataTransfer && e.dataTransfer.files;
+                if (dropped && dropped.length) window.handleFiles?.(dropped);
+            });
+            dropZoneEl.addEventListener('click', (e) => {
+                // 点「选择文件」按钮时不要再冒泡触发一次，避免弹两次选择框
+                if (e.target && e.target.closest && e.target.closest('#chooseFileBtn')) return;
+                document.getElementById('fileInput')?.click();
+            });
+        }
         if (elements.liveToggleBtn) {
             elements.liveToggleBtn.onclick = () => window.toggleLiveCapture?.();
         }
