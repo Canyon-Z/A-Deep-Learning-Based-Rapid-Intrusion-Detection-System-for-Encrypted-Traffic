@@ -1,0 +1,39 @@
+name: tests
+
+# 项目此前没有任何自动化测试与 CI（验收报告缺口：零 tests/、零 CI）。
+# 这个 workflow 只做一件事：在干净环境里跑 `python -m unittest discover -s tests`，
+# 保证「判决口径唯一真源」「阈值校验」「跨域结果标注」「训练切分无泄漏」这四条
+# 曾经出过问题的契约不会再次退化。
+#
+# 权重与实验产物跟随仓库（checkpoints/、logs/），因此这些用例在 CI 里也能拿到
+# 真实输入；缺少产物的用例会自己 skip，不会把 CI 变成红叉。
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas scikit-learn fastapi httpx python-multipart jinja2 itsdangerous
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Run unit tests
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: '1'
+        run: python -m unittest discover -s tests -t . -v

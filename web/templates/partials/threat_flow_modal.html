@@ -1,0 +1,53 @@
+<!-- 「威胁类型分布」卡片点开某一类后的流明细弹窗。
+     和数据卡片同源：卡片每行显示某个类的 count，点开列出就是这批流的逐条明细
+     （后端 threat_flows，与 threat_summary 同一次推理产出，条数天然对得上）。
+     刻意不复用 detail_modal.html：那个是「单文件流量深度分析报告」（带 28×28 载荷图、
+     字节直方图、模型投票），语义与字段都不同，硬塞进去只会两边都别扭。 -->
+<div id="threatFlowModal" onclick="if(event.target === this) closeThreatFlowModal()"
+     class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+    <!-- max-width / max-height 用内联样式写：本项目的 Tailwind 是构建期预编译产物
+         （web/static/vendor/tailwind.css），max-w-3xl 与 max-h-[85vh] 都没被扫进去，
+         写在 class 里等于不生效——弹窗会撑满整屏。 -->
+    <div onclick="event.stopPropagation()" class="glass-card w-full flex flex-col rounded-xl"
+         style="max-width:48rem; max-height:85vh;">
+
+        <div class="panel-head">
+            <h3 class="panel-title">
+                <i class="fa-solid fa-list-ul text-cyber-primary mr-2"></i>
+                <span id="threatFlowTitle">威胁类型</span>
+            </h3>
+            <button onclick="closeThreatFlowModal()" title="关闭" aria-label="关闭" class="btn btn-ghost btn-sm">
+                <i class="fa-solid fa-times"></i>
+            </button>
+        </div>
+
+        <div class="px-5 py-2 text-xs font-mono flex items-center justify-between border-b border-cyber-border">
+            <span id="threatFlowSubtitle" class="text-gray-400">-</span>
+            <span id="threatFlowCount" class="text-cyber-primary">0 个连接</span>
+        </div>
+
+        <div class="overflow-y-auto flex-1">
+            <table class="w-full text-left border-collapse text-xs">
+                <thead class="sticky top-0 backdrop-blur" style="background: rgba(21, 28, 40, 0.95);">
+                    <tr class="text-gray-400 border-b border-cyber-border">
+                        <th class="px-3 py-2 font-medium">源 IP:端口</th>
+                        <th class="px-3 py-2 font-medium">目的 IP:端口</th>
+                        <th class="px-3 py-2 font-medium">协议</th>
+                        <th class="px-3 py-2 font-medium">预测</th>
+                        <th class="px-3 py-2 font-medium text-right">置信度</th>
+                        <th class="px-3 py-2 font-medium">档位</th>
+                        <th class="px-3 py-2 font-medium text-right">OOD 距离</th>
+                        <th class="px-3 py-2 font-medium text-right">包数</th>
+                    </tr>
+                </thead>
+                <tbody id="threatFlowTableBody" class="text-gray-300"></tbody>
+            </table>
+            <p id="threatFlowEmpty" class="threat-empty" style="display:none">该分类下暂无连接</p>
+        </div>
+
+        <div class="px-5 py-2.5 border-t border-cyber-border text-xs text-gray-500 font-mono flex items-center gap-2">
+            <i class="fa-solid fa-circle-info"></i>
+            <span id="threatFlowFootnote">数据与上方卡片同一次推理，条数一一对应</span>
+        </div>
+    </div>
+</div>

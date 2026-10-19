@@ -1,0 +1,64 @@
+<!-- 三档分流：安全运营的核心输出。数字大、说明小，一眼看出多少条需要人来判断。
+     三段颜色只用语义色（success / warning / danger），不引入新的强调色，
+     与全站「一个强调色 + 语义色」的约定保持一致。
+
+     空态：还没跑过分类时，三组各有三个 "--" 占位，24px 的占位符读起来像三条
+     横贯卡片的破折号，而这一列本来就已经很高。所以空态整组收起，只留一行说明
+     （.tier-empty），由 flow_impl.js 的 renderTiers 切换 #flowTierPanel.is-empty。 -->
+<div id="flowTierPanel" class="panel flex flex-col is-empty">
+    <div class="panel-head">
+        <h2 class="panel-title">
+            <i class="fa-solid fa-layer-group text-cyber-primary mr-2"></i>风险分流
+        </h2>
+        <span class="panel-hint">本次上传</span>
+    </div>
+    <div class="p-4 flex-1 flex flex-col justify-center gap-4">
+        <div class="tier-group">
+            <div class="flex items-baseline justify-between mb-1.5">
+                <span class="text-[11px] uppercase tracking-wider text-gray-500">自动处置</span>
+                <span class="text-xs font-mono" id="flowTierAutoRatio" style="color: var(--ds-success)">--</span>
+            </div>
+            <p class="text-2xl font-mono font-semibold text-gray-100 leading-none" id="flowTierAutoCount">--</p>
+            <div class="h-1 rounded-full overflow-hidden mt-2" style="background: var(--ds-bg);">
+                <div id="flowTierAutoBar" class="h-full rounded-full"
+                     style="width: 0%; background: var(--ds-success); transition: width .35s ease;"></div>
+            </div>
+        </div>
+
+        <div class="tier-group">
+            <div class="flex items-baseline justify-between mb-1.5">
+                <span class="text-[11px] uppercase tracking-wider text-gray-500">告警待确认</span>
+                <span class="text-xs font-mono" id="flowTierReviewRatio" style="color: var(--ds-warning)">--</span>
+            </div>
+            <p class="text-2xl font-mono font-semibold text-gray-100 leading-none" id="flowTierReviewCount">--</p>
+            <div class="h-1 rounded-full overflow-hidden mt-2" style="background: var(--ds-bg);">
+                <div id="flowTierReviewBar" class="h-full rounded-full"
+                     style="width: 0%; background: var(--ds-warning); transition: width .35s ease;"></div>
+            </div>
+        </div>
+
+        <div class="tier-group">
+            <div class="flex items-baseline justify-between mb-1.5">
+                <span class="text-[11px] uppercase tracking-wider text-gray-500">人工复核</span>
+                <span class="text-xs font-mono" id="flowTierManualRatio" style="color: var(--ds-danger)">--</span>
+            </div>
+            <p class="text-2xl font-mono font-semibold text-gray-100 leading-none" id="flowTierManualCount">--</p>
+            <div class="h-1 rounded-full overflow-hidden mt-2" style="background: var(--ds-bg);">
+                <div id="flowTierManualBar" class="h-full rounded-full"
+                     style="width: 0%; background: var(--ds-danger); transition: width .35s ease;"></div>
+            </div>
+        </div>
+
+        <p class="tier-empty">
+            尚未分类。<br>上传流特征 CSV 后，这里按置信度分成三档。
+        </p>
+
+        <!-- 口径说明：三个档位名过去没有任何解释，用户不知道它们是结论还是待办。 -->
+        <p class="text-[10px] leading-relaxed text-gray-600">
+            分档口径：置信度 ≥ 高阈值 → 自动处置（系统直接采信，无需人工）；
+            介于低/高阈值之间 → 告警待确认（建议人工确认）；
+            低于低阈值或属分布外 → 人工复核（必须人工定案）。
+            两个阈值可在左侧上传卡里调整，改完重新分类即生效。
+        </p>
+    </div>
+</div>

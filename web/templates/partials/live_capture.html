@@ -5,7 +5,7 @@
         <h2 class="panel-title">
             <i class="fa-solid fa-tower-broadcast text-cyber-primary mr-2"></i>实时抓包检测
         </h2>
-        <span class="panel-hint">状态 <span id="liveStatus" class="font-mono text-gray-300">停止</span></span>
+        <span class="panel-hint">状态 <span id="liveStatus" class="live-status"><span class="status-dot"></span><span id="liveStatusText">停止</span></span></span>
     </div>
 
     <div class="mx-4 mt-4 flex flex-col gap-3">
@@ -32,15 +32,31 @@
     </div>
 
     <div id="liveFlowGraphWrap" class="mx-4 mt-3 live-flow-graph-wrap h-[31rem]">
+        <!-- 图内只保留缩放控件；清空日志统一走记录卡的「清除日志」，避免两个入口做同一件事 -->
         <div class="live-flow-toolbar">
-            <button id="clearLiveLogsBtn" class="live-flow-tool-btn">清空</button>
+            <!-- 视图切换：辐射图看「几何方位」，桑基图看「流量占比」，两者回答的问题不同 -->
+            <div class="live-flow-view-switch" role="group" aria-label="视图切换">
+                <button type="button" id="liveViewRadial" class="live-flow-tool-btn live-flow-view-btn is-active"
+                        data-live-view="radial" title="以本机为圆心的方位图：对端在哪个方向、是否活跃">
+                    辐射图
+                </button>
+                <button type="button" id="liveViewSankey" class="live-flow-tool-btn live-flow-view-btn"
+                        data-live-view="sankey" title="按流量占比排布：谁占用了最多带宽、是否恶意">
+                    桑基图
+                </button>
+            </div>
+            <span class="live-flow-toolbar-spacer"></span>
             <button id="liveFlowZoomOut" class="live-flow-tool-btn">-</button>
             <button id="liveFlowZoomReset" class="live-flow-tool-btn">1:1</button>
             <button id="liveFlowZoomIn" class="live-flow-tool-btn">+</button>
         </div>
         <div id="liveFlowTooltip" class="live-flow-tooltip hidden"></div>
         <div id="liveFlowGraph" class="w-full h-full"></div>
+        <div id="liveSankeyGraph" class="w-full h-full hidden"></div>
     </div>
 
-    <div id="liveFlowList" class="m-4 h-16 overflow-auto rounded-md bg-black/20 border border-cyber-border text-xs"></div>
+    <!-- 事件流列表：由 liveGraph.js 的 renderFlowList 渲染成「时间 | 对端 | 协议 | 字节 | 判定」
+         五列表格。占位文案直接写在 HTML 里，因为未开始抓包时 renderFlowList 不会被调用，
+         只靠 JS 填空态等于不填。有数据后 JS 会整个替换这里的内容。 -->
+    <div id="liveFlowList" class="m-4 live-flow-list"><p class="flow-empty">暂无实时流量</p></div>
 </div>

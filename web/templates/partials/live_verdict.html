@@ -1,0 +1,90 @@
+<!-- 【当前未被引用】live 页右栏已改回 partials/threat_chart.html。
+     这张卡是 2026-10-18 21:38 临时替代六分类卡做的：那时候实时抓包确实算不出六分类，
+     六分类卡在 live 页永远是空的。现在后端 packet_handler 给每个包喂 78 维累加器、
+     /api/live/stats 返回活跃流的六分类汇总，那张卡在 live 页有真实数据了，所以换回去。
+     这份模板保留作参考（二分类占比的表达方式还有用），不要再 include 到任何页面。
+     原先这里放的是「威胁类型分布」六分类条形卡，但实时抓包只做二分类判定，
+     那张卡在 live 页永远是空的（只有一句「六分类请看别处」的说明），
+     却占掉右栏整整一列的高度。这一列换成实时抓包真正产出的东西：
+     本次会话里正常 / 恶意各多少，以及它们的占比。
+     数据来自统一统计层（main.js 的 dlidsStats.live），不新增数据源。 -->
+<div id="liveVerdictPanel" class="panel flex flex-col">
+    <div class="panel-head">
+        <h2 class="panel-title">
+            <i class="fa-solid fa-signal text-cyber-primary mr-2"></i>实时判定
+        </h2>
+        <span class="panel-hint">本次会话</span>
+    </div>
+
+    <div class="p-4 flex-1 flex flex-col justify-center gap-5">
+        <div>
+            <div class="flex items-baseline justify-between mb-2">
+                <span class="text-[11px] uppercase tracking-wider text-gray-500">正常 / 恶意 占比</span>
+                <span class="text-xs font-mono text-gray-400" id="liveSplitHint">--</span>
+            </div>
+            <div class="live-split">
+                <div id="liveSplitBenign" class="live-split-seg is-benign" style="width: 0%;"></div>
+                <div id="liveSplitMalware" class="live-split-seg is-malware" style="width: 0%;"></div>
+            </div>
+        </div>
+
+        <div class="live-verdict-counts">
+            <div class="live-verdict-item">
+                <span class="live-verdict-dot" style="background: var(--ds-success);"></span>
+                <span class="live-verdict-label">正常流量</span>
+                <span class="live-verdict-num font-mono" id="liveSplitBenignCount">0</span>
+            </div>
+            <div class="live-verdict-item">
+                <span class="live-verdict-dot" style="background: var(--ds-danger);"></span>
+                <span class="live-verdict-label">恶意流量</span>
+                <span class="live-verdict-num font-mono" id="liveSplitMalwareCount">0</span>
+            </div>
+            <div class="live-verdict-item">
+                <span class="live-verdict-dot" style="background: var(--ds-border-strong);"></span>
+                <span class="live-verdict-label">会话总数</span>
+                <span class="live-verdict-num font-mono" id="liveSplitTotalCount">0</span>
+            </div>
+        </div>
+
+        <p class="text-[11px] text-gray-600 leading-relaxed">
+            实时抓包只做二分类判定（正常 / 恶意）。六分类的攻击类型分布请看
+            <a href="/detect" class="text-cyber-primary hover:underline">检测工作台</a> 或
+            <a href="/flow" class="text-cyber-primary hover:underline">流量分类</a>。
+        </p>
+    </div>
+</div>
+
+<script>
+    // 右栏的渲染钩子。main.js 的 dlidsRenderStats 在更新完 KPI 后调它（可选钩子，
+    // 别的页面没有这个函数就跳过），所以这里不需要自己轮询、也不需要额外接口。
+    (function () {
+        function setWidth(el, pct) {
+            if (el) el.style.width = Math.max(0, Math.min(100, pct)).toFixed(2) + '%';
+        }
+        window.dlidsRenderLivePanel = function () {
+            var snap = typeof window.dlidsStatsSnapshot === 'function' ? window.dlidsStatsSnapshot() : null;
+            if (!snap) return;
+            // snapshot 暴露的是拍平后的 liveTotal / liveMalware，不是嵌套的 live 对象。
+            // 取错字段不会报错，只会安静地显示 0，所以这里按拍平字段读。
+            var total = snap.liveTotal || 0;
+            var mal = snap.liveMalware || 0;
+            var ben = Math.max(0, total - mal);
+
+            var benPct = total > 0 ? (ben / total * 100) : 0;
+            var malPct = total > 0 ? (mal / total * 100) : 0;
+            setWidth(document.getElementById('liveSplitBenign'), benPct);
+            setWidth(document.getElementById('liveSplitMalware'), malPct);
+
+            var hint = document.getElementById('liveSplitHint');
+            // 没有会话时留破折号：0 条里 0 条恶意，不等于「全部正常」。
+            if (hint) hint.innerText = total > 0 ? malPct.toFixed(1) + '% 恶意' : '--';
+
+            var bEl = document.getElementById('liveSplitBenignCount');
+            var mEl = document.getElementById('liveSplitMalwareCount');
+            var tEl = document.getElementById('liveSplitTotalCount');
+            if (bEl) bEl.innerText = ben.toLocaleString();
+            if (mEl) mEl.innerText = mal.toLocaleString();
+            if (tEl) tEl.innerText = total.toLocaleString();
+        };
+    })();
+</script>

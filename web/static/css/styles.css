@@ -22,9 +22,16 @@
     --ds-radius: 10px;
     --ds-radius-sm: 6px;
 
-    /* 动效规范：两档时长 + 单一缓动曲线。
-       fast 用于悬停、按压、颜色与边框变化；base 用于面板显隐、视图切换、数值变化。
-       任何地方都不要自造第三档时长或第二种缓动。 */
+    /* 图表色：HTML 里的图例色块与 ECharts 的 series 必须取同一组值。
+       过去图例写 var(--ds-accent)（青）、折线画 #10B981（绿），同一条曲线在
+       图例里是另一个颜色。颜色只在这里定义一次，两侧都引用它。 */
+    --ds-chart-normal: #10B981;
+    --ds-chart-malware: #F43F5E;
+
+    /* 动效规范：三档时长 + 单一缓动曲线。
+       fast 用于悬停、按压、颜色与边框变化；base 用于面板显隐、视图切换、数值变化；
+       slow 用于图表重绘与入场这类「有先后顺序」的变化。
+       任何地方都不要自造第四档时长或第二种缓动。 */
     --mo-fast: 140ms;
     --mo-base: 220ms;
     --mo-slow: 420ms;
@@ -148,6 +155,14 @@ body kbd {
 
 .kpi-value.is-danger {
     color: var(--ds-danger);
+}
+
+/* 模型名这类「文本读数」不该用数字的 22px 大字重，否则和相邻的计数值抢层级 */
+.kpi-value.is-text {
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1.5;
+    letter-spacing: 0;
 }
 
 .kpi-value .unit {
@@ -288,84 +303,22 @@ body kbd {
 }
 
 /* ==========================================================================
-   模型条（主从视图的「主」）：紧凑、可扫描
+   状态徽标（.mc-state）
+   原先挂在模型卡上（.model-chip .mc-state）。模型主视图改成对比表之后，
+   同一个徽标出现在表格行与顶栏配置浮层两处，所以拆成独立组件，不再依赖父级。
    ========================================================================== */
 
-.model-strip {
-    display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 8px;
-    padding: 14px 18px;
-}
-
-@media (max-width: 1200px) {
-    .model-strip {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-}
-
-@media (max-width: 700px) {
-    .model-strip {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-}
-
-.model-chip {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 11px 13px;
-    border: 1px solid var(--ds-border);
-    border-radius: 8px;
-    background: var(--ds-card);
-    text-align: left;
-    cursor: pointer;
-    transition: border-color var(--mo-fast) var(--mo-ease), background-color var(--mo-fast) var(--mo-ease);
-}
-
-.model-chip:hover {
-    border-color: var(--ds-border-strong);
-    background: var(--ds-card-hi);
-}
-
-.model-chip.is-active {
-    border-color: rgba(34, 211, 238, 0.45);
-    background: var(--ds-accent-soft);
-}
-
-.model-chip .mc-name {
-    font-size: 12.5px;
-    font-weight: 600;
-    color: var(--ds-text);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.model-chip .mc-acc {
-    font-size: 17px;
-    font-weight: 600;
-    color: var(--ds-text);
-}
-
-.model-chip .mc-meta {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 6px;
-    font-size: 10.5px;
-    color: var(--ds-text-mute);
-}
-
-.model-chip .mc-state {
+.mc-state {
+    display: inline-block;
     font-size: 10px;
+    line-height: 1.6;
     padding: 1px 6px;
     border-radius: 4px;
     background: rgba(255, 255, 255, 0.05);
     color: var(--ds-text-mute);
 }
 
-.model-chip.is-active .mc-state {
+.cmp-row.is-active .mc-state {
     background: rgba(34, 211, 238, 0.18);
     color: var(--ds-accent);
 }
@@ -453,6 +406,21 @@ body kbd {
 
 .data-table tbody tr:hover {
     background: rgba(255, 255, 255, 0.02);
+}
+
+/* 文件名列给上下限，避免长文件名把整张表撑开、也避免容器变窄时被压成一条。
+   不要写成 width:100%：那会让 auto 布局把其余列压到最小内容宽度，
+   表头会互相叠在一起（第一版就是这么写的，截图里右侧八列全挤成一坨）。 */
+#resultCardPanel .data-table thead th:first-child,
+#resultCardPanel .data-table tbody td:first-child {
+    min-width: 220px;
+    max-width: 360px;
+}
+
+#resultCardPanel .data-table tbody td:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* ==========================================================================
@@ -598,6 +566,133 @@ body kbd {
     border-radius: var(--ds-radius);
     position: relative;
     overflow: hidden;
+}
+
+/* 画布下方的事件流列表。定高放在这里而不是用 tailwind 的 h-16/h-40：
+   预编译产物里的 spacing 类不全，写 h-40 有静默失效的风险（h-16 恰好在产物里）。
+   176px 约等于 8 行，超过就在框内滚动。
+
+   原先每行是「时间 ip:port → ip:port」的等宽纯文本，逐行 border-b，信息只有两个端点，
+   字节 / 协议 / 毫秒时间 / 判定全被丢掉。改成 grid 列后一行同时读全五个维度，
+   判定用徽标而不是整行文字变色。 */
+.live-flow-list {
+    height: 176px;
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: rgba(0, 0, 0, 0.20);
+    border: 1px solid var(--ds-border);
+    border-radius: var(--ds-radius-sm);
+    overflow: hidden;
+}
+
+/* 空态：列表里只有这一个 <p> 时居中（有记录时子元素是 head + rows，选择器不命中）。 */
+.flow-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    margin: 0;
+    font-size: 13px;
+    color: var(--ds-text-dim);
+}
+
+.flow-list-head {
+    flex: none;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 8px 12px 6px;
+    border-bottom: 1px solid var(--ds-border);
+}
+
+.flow-list-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ds-text-dim);
+}
+
+.flow-list-count {
+    font-size: 11px;
+    color: var(--ds-text-mute);
+    font-variant-numeric: tabular-nums;
+}
+
+/* 列头与数据行共用一套 grid 轨道，保证「字节」右对齐、判定列左对齐。 */
+.flow-head-row,
+.flow-row {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr) 44px 72px 72px;
+    gap: 12px;
+    align-items: center;
+    padding: 6px 12px;
+}
+
+.flow-head-row {
+    flex: none;
+    font-size: 11px;
+    color: var(--ds-text-mute);
+    border-bottom: 1px solid var(--ds-border);
+}
+
+.flow-rows {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+}
+
+.flow-row {
+    font-size: 12px;
+    border-bottom: 1px solid rgba(34, 44, 58, 0.4);
+}
+
+.flow-row:last-child {
+    border-bottom: 0;
+}
+
+.flow-time {
+    font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+    font-variant-numeric: tabular-nums;
+    color: var(--ds-text-mute);
+    white-space: nowrap;
+}
+
+.flow-peer {
+    color: var(--ds-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.flow-proto {
+    font-size: 11px;
+    color: var(--ds-text-dim);
+}
+
+.flow-bytes {
+    font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+    font-variant-numeric: tabular-nums;
+    color: var(--ds-text-dim);
+    text-align: right;
+}
+
+.flow-verdict {
+    justify-self: start;
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+.flow-verdict.is-ok {
+    color: var(--ds-text-dim);
+    background: rgba(148, 163, 184, 0.12);
+}
+
+.flow-verdict.is-bad {
+    color: var(--ds-danger);
+    background: rgba(244, 63, 94, 0.12);
 }
 
 .live-flow-toolbar {
@@ -953,6 +1048,9 @@ html.is-rail .app-side-foot .btn i {
     position: sticky;
     top: 0;
     z-index: 30;
+    /* 运行配置浮层是顶栏的子元素，会向下伸出 64px 的顶栏高度：
+       这里必须是 visible，否则浮层被裁成一条缝，表现就是「点了打不开」。 */
+    overflow: visible;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1026,13 +1124,501 @@ html.is-rail .app-side-foot .btn i {
     display: grid;
     grid-template-columns: repeat(12, minmax(0, 1fr));
     gap: 20px;
-    align-items: start;
+    /* 同一行的列等高（原来是 start，卡片各按内容高度收口）：
+       一旦某列内容更高，另一列就会「半截收尾」，底边错开一截、下面留一大片空白。 */
+    align-items: stretch;
 }
 
 .col-4 { grid-column: span 4; }
 .col-6 { grid-column: span 6; }
 .col-8 { grid-column: span 8; }
 .col-12 { grid-column: span 12; }
+
+/* 列自身是一根竖直的栈；配合上面的 stretch，列里的卡片底边永远齐平。
+   min-width:0 是给 grid 子项的标准处理，避免长内容把列撑破。 */
+.grid-12 > [class*="col-"] {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    min-width: 0;
+}
+
+/* 卡片默认撑满列高：内容区（图表/表格）用 flex-1 自然吸收多出来的高度。
+   单列内容本来就最高时，flex-grow 也不会改变它的高度。 */
+.grid-12 > [class*="col-"] > .panel {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+/* 威胁类型分布 / 流量监测趋势：最小高度 360px。
+   这里直接写死而不是用 Tailwind 的 min-h-[360px]——本地预编译的 tailwind.css 是构建期产物，
+   扫描不到任意值类就不会出现在产物里，样式会静默失效（h-[360px] 在里面，min-h-[360px] 不在）。 */
+/* 注意特异性：上面 `.grid-12 > [class*="col-"] > .panel` 写了 min-height: 0，
+   `.threat-panel` 这种单类选择器会被它压住（实测计算值是 0px），
+   最小高度必须写到同一层级才真正生效。 */
+.grid-12 > [class*="col-"] > .panel.threat-panel,
+.grid-12 > [class*="col-"] > .panel#trendChartPanel,
+/* 检测工作台把趋势卡放进了 .detect-pane（上传检测 / 实时抓包两个子视图各占一层），
+   DOM 深度变了，上面那两条「col-* 的直接子」就匹配不到了 —— 图表容器高度塌成 0，
+   卡片只剩标题栏。下面两条按 .detect-pane 重新声明，特异性 (1,3,0) 高于上方的 (1,2,0)，
+   不依赖书写顺序。 */
+.grid-12 .detect-pane > .panel.threat-panel,
+.grid-12 .detect-pane > .panel#trendChartPanel {
+    min-height: 360px;
+}
+
+/* 子视图里相邻卡片的间距。原先是靠模板里的 Tailwind mt-4 包裹层做的，
+   但包裹层会破坏上面「直接子元素」的选择器，所以间距改由 CSS 提供。 */
+.detect-pane > .panel + .panel {
+    margin-top: 16px;
+}
+
+/* 趋势图容器的高度：不要依赖模板里的 `h-full`（height:100%）。
+   中间那层是 flex 分配出来的尺寸，Chrome 在这里把百分比高度解析成 0，
+   结果整张卡片只有标题栏 + 一片空白（ECharts 的 canvas 也是 0 高）。
+   改成用 flex 分配 + min-height 兜底，容器高度就不再依赖百分比解析。 */
+#trendChartPanel > .flex-1 {
+    display: flex;
+    flex-direction: column;
+}
+
+#trendChartPanel #lineChart {
+    flex: 1 1 auto;
+    height: auto;
+    width: 100%;
+    min-height: 240px;
+}
+
+/* 六分类条形区：卡片高度跟随所在行（实时抓包页右列会跟左边的辐射图一样高），
+   但内容不跟着无限长高——上限 420px 并在剩余空间里纵向居中。
+   align-items 必须是 stretch，不能是 center：竖向排列时 center 会把每一行
+   收窄到自身内容宽度，条形就撑不满卡片了（换成条形图后踩过一次）。 */
+.threat-chart-body {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    min-height: 240px;
+    max-height: 420px;
+    margin: auto 0;
+}
+
+/* 六分类条形：每一类的行高、轨道、填充都写在这里，不用 Tailwind 类。
+   原因和上面 min-height 一样——web/static/vendor/tailwind.css 是构建期预编译产物，
+   实测里面没有 h-1.5 / space-y-2.5 / text-[13px] / py-6 这些类，
+   写了就是静默失效（条形高度变 0，整张卡片看起来是空的）。 */
+.threat-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+}
+
+.threat-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* 有数据的行可点开看明细。可点性必须看得出来：光靠 cursor 不够，
+   触屏和远程桌面里根本看不到光标形状，所以加 hover 底色 + 名称变色。
+   这里刻意不加 padding/负 margin：卡片内容区高度是算着 7 行 × (行高 + 间距)
+   卡在 420px 上限里的，给每行加垂直内边距会把卡片撑高、触发内部滚动。
+   0 条的分类不带 is-clickable，也就没有任何可点的视觉暗示。 */
+.threat-row.is-clickable {
+    cursor: pointer;
+    border-radius: 6px;
+    transition: background 0.15s ease;
+}
+
+.threat-row.is-clickable:hover {
+    background: rgba(34, 211, 238, 0.09);
+    box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.09);
+}
+
+.threat-row.is-clickable:hover .threat-row-name {
+    color: var(--ds-accent);
+}
+
+.threat-row.is-clickable:active {
+    background: rgba(34, 211, 238, 0.16);
+}
+
+.threat-row-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.threat-row-name {
+    font-size: 13px;
+    color: var(--ds-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.threat-row-value {
+    font-size: 11px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--ds-text-mute);
+    white-space: nowrap;
+}
+
+.threat-track {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--ds-card);
+    overflow: hidden;
+}
+
+.threat-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.35s ease;
+}
+
+/* 未知攻击是六类之外的 OOD 项，用虚线轨道提示「这不是六类里的正常结果」。
+   描边色跟 main.js 里 OOD_CLASS_NAME 的 #94A3B8（中性灰）走，别再改成紫色系——
+   紫色已经是 DoS-Slowloris 的，两个紫挨在相邻两行时肉眼分不出来。 */
+.threat-row.is-unknown .threat-track {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.35);
+}
+
+.threat-empty {
+    text-align: center;
+    color: var(--ds-text-mute);
+    font-size: 13px;
+    padding: 24px 0;
+    margin: 0;
+}
+
+/* ── 待复核队列 ────────────────────────────────────────────────────
+   固定最大高度 + 内部滚动。原模板写的是 Tailwind 的 max-h-[320px] /
+   min-h-[160px] / overflow-y-auto，但 web/static/vendor/tailwind.css 是构建期
+   预编译产物，任意值类只有构建时扫到源码里出现的那几个才存在（实测产物里只有
+   min-h-[176px]/[220px]/[240px]/[420px]，没有 max-h-[320px]），写了等于没写——
+   几十条待复核记录会把卡片一直往下撑，整页被拉长。
+   高度上限必须写在自有样式表里才可靠。 */
+.review-queue-list {
+    min-height: 160px;
+    max-height: 320px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+}
+
+.review-queue-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.review-queue-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.review-queue-list::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.35);
+    border-radius: 3px;
+}
+
+.review-queue-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.55);
+}
+
+/* 校准拖拽卡片：min-h-[132px] 不在 Tailwind 产物里（产物任意值只有
+   min-h-[176px]/[220px]/[240px]/[420px] 与 max-h-[300px]），改用自有类兜底。 */
+.calib-dropzone {
+    min-height: 132px;
+}
+
+/* 三档分流的空态说明：模板原来挂的是 `tier-empty text-[11.5px]`，
+   两个类在产物里都不存在（tier-empty 是自定义名，text-[11.5px] 是非整数任意值），
+   于是这段文字一直按浏览器默认 16px 渲染，比周围正文还大。 */
+.tier-empty {
+    margin: 8px 0 0;
+    font-size: 11.5px;
+    line-height: 1.7;
+    color: var(--ds-text-mute);
+}
+
+/* ── 待复核队列的条目与复核动作 ────────────────────────────────────
+   动作按钮必须常驻显示，不能做成 hover 才浮现的图标：用户要能一眼看出
+   「这一条可以怎么处理」，藏起来等于没有复核入口。 */
+.review-item {
+    padding: 6px 8px;
+    border-radius: 6px;
+}
+
+.review-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.review-item-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.review-item-main {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.review-item-flow {
+    font-size: 12px;
+    color: var(--ds-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.review-item-meta {
+    font-size: 11px;
+    color: var(--ds-text-mute);
+    margin-top: 2px;
+}
+
+.review-item-tier {
+    flex: 0 0 auto;
+    font-size: 11px;
+    line-height: 1.6;
+    padding: 0 6px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
+
+.review-item-tier.is-unknown {
+    color: #e879f9;
+    border-color: rgba(232, 121, 249, 0.35);
+    background: rgba(232, 121, 249, 0.08);
+}
+
+.review-item-tier.is-manual {
+    color: #fb923c;
+    border-color: rgba(251, 146, 60, 0.35);
+    background: rgba(251, 146, 60, 0.08);
+}
+
+.review-item-tier.is-review {
+    color: #facc15;
+    border-color: rgba(250, 204, 21, 0.35);
+    background: rgba(250, 204, 21, 0.08);
+}
+
+.review-item-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.review-action {
+    flex: 1 1 0;
+    font-size: 11px;
+    line-height: 1.5;
+    padding: 2px 0;
+    border-radius: 5px;
+    border: 1px solid var(--ds-border);
+    background: transparent;
+    color: var(--ds-text-mute);
+    cursor: pointer;
+    transition: color .15s ease, border-color .15s ease, background .15s ease;
+}
+
+.review-action:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.review-action:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.review-action.is-attack:hover:not(:disabled) {
+    color: #f87171;
+    border-color: rgba(248, 113, 113, 0.5);
+}
+
+.review-action.is-benign:hover:not(:disabled) {
+    color: #4ade80;
+    border-color: rgba(74, 222, 128, 0.5);
+}
+
+.review-action.is-ignore:hover:not(:disabled) {
+    color: #94a3b8;
+    border-color: rgba(148, 163, 184, 0.5);
+}
+
+/* ── 跨域能力评估面板 ──────────────────────────────────────────────
+   表格与标注全部写在这里，不用 Tailwind：web/static/vendor/tailwind.css 是
+   构建期预编译产物，px-2 / text-[11px] / overflow-x-auto 这类类不一定在产物里，
+   写了就是静默失效（威胁类型分布卡踩过同一个坑，条形高度变 0）。 */
+.xd-note {
+    font-size: 13px;
+    color: var(--ds-text-mute);
+    margin: 0 0 16px;
+    line-height: 1.6;
+}
+
+.xd-h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ds-text);
+    margin: 18px 0 8px;
+}
+
+/* ── 跨域面板的使用前提（缺陷 M4）─────────────────────────────────
+   这一页陈列的是实验原始数字，其中有些组的实验条件根本不成立
+   （image_ics 上 MLP 只有 0.10% 准确率、FPR 99.91%；切分泄漏；
+   比率口径越界）。不能只把数字并排放，必须让「不可引用」比数字更显眼。 */
+.xd-caveats {
+    margin: 0 0 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.xd-caveat-title {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    color: var(--ds-text-mute);
+    text-transform: uppercase;
+}
+
+.xd-caveat-intro {
+    margin: 0 0 2px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--ds-text-mute);
+}
+
+.xd-caveat {
+    border: 1px solid #2A3444;
+    border-left-width: 3px;
+    border-radius: 8px;
+    padding: 8px 12px;
+    background: #131A24;
+}
+
+.xd-caveat-bad {
+    border-left-color: #E4574F;
+    background: rgba(228, 87, 79, .08);
+}
+
+.xd-caveat-warn {
+    border-left-color: #D9A23B;
+    background: rgba(217, 162, 59, .07);
+}
+
+.xd-caveat-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ds-text);
+}
+
+.xd-caveat-badge {
+    flex: none;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    padding: 1px 6px;
+    border-radius: 4px;
+    color: #0B1118;
+    background: #D9A23B;
+}
+
+.xd-caveat-bad .xd-caveat-badge {
+    background: #E4574F;
+}
+
+.xd-caveat-list {
+    margin: 6px 0 0;
+    padding-left: 16px;
+    font-size: 12px;
+    line-height: 1.65;
+    color: var(--ds-text-mute);
+    list-style: disc;
+}
+
+.xd-scroll {
+    overflow-x: auto;
+    border: 1px solid #222C3A;
+    border-radius: 10px;
+}
+
+.xd-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    min-width: 640px;
+}
+
+.xd-table thead th {
+    text-align: left;
+    padding: 9px 12px;
+    font-weight: 600;
+    color: var(--ds-text-mute);
+    background: var(--ds-card);
+    border-bottom: 1px solid #222C3A;
+    white-space: nowrap;
+}
+
+.xd-table tbody td {
+    padding: 9px 12px;
+    color: var(--ds-text);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    white-space: nowrap;
+}
+
+.xd-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.xd-sub {
+    font-weight: 400;
+    font-size: 10px;
+    color: var(--ds-text-mute);
+    opacity: 0.8;
+}
+
+.xd-empty {
+    text-align: center;
+    color: var(--ds-text-mute);
+    padding: 20px 0;
+}
+
+/* 表下注解：单位口径、数据来源、已知限制。字号比正文小一档，
+   用静音色，避免把口径说明读成结论本身。 */
+.xd-footnote {
+    margin: 10px 2px 0;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--ds-text-mute);
+}
+
+/* 三档着色：>=90 好、60~90 可疑、<60 基本失效。 */
+.xd-good { color: #10B981; }
+.xd-mid  { color: #F59E0B; }
+.xd-bad  { color: #F43F5E; }
+
+.xd-foot {
+    margin: 16px 0 0;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: rgba(244, 63, 94, 0.06);
+    border: 1px solid rgba(244, 63, 94, 0.18);
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--ds-text-mute);
+}
 
 .stack {
     display: flex;
@@ -1176,3 +1762,835 @@ html.is-rail .app-side-foot .btn i {
     transform: scaleX(1);
     transition: transform var(--mo-fast) linear;
 }
+
+/* ==========================================================================
+   顶栏「运行配置」浮层（承接原 KPI 带第 3、4 格）
+   KPI 带是读数区，模型下拉与检测模式开关是控件。控件混进读数区有两个后果：
+   一是读者分不清某个数字是指标还是设置项，二是这一条带子每页都出现，
+   两个可交互控件因此在 6 个页面各复制一次，抢走了首屏最高权重。
+   现在控件收进顶栏浮层，KPI 带 4 格全部是纯读数。
+   ========================================================================== */
+.app-cfg {
+    position: relative;
+}
+
+/* 浮层开着的时候，按钮本身必须看得出来是「按下」状态。
+   原先 JS 只加了 is-active 类而没有对应样式，点完之后按钮毫无变化，
+   加上浮层贴在顶栏下沿、容易被内容区的第一行吸走注意力，
+   用起来就像「点了没反应」。 */
+.app-cfg .btn.is-active {
+    color: var(--ds-accent);
+    background: var(--ds-accent-soft);
+    border-color: rgba(34, 211, 238, 0.45);
+}
+
+.runtime-pop {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 40;
+    width: 324px;
+    /* 窗口矮的时候浮层不能顶出可视区：200px 的固定内容在 768 高的屏上刚好压线 */
+    max-height: calc(100vh - 96px);
+    overflow-y: auto;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    border: 1px solid var(--ds-border-strong);
+    border-radius: var(--ds-radius);
+    background: var(--ds-panel);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+}
+
+.runtime-pop[hidden] {
+    display: none;
+}
+
+.runtime-pop-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--ds-border);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ds-text);
+}
+
+.runtime-pop-head span {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--ds-text-mute);
+}
+
+.cfg-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.cfg-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--ds-text-mute);
+}
+
+.cfg-label i {
+    color: var(--ds-accent);
+}
+
+.cfg-row .select-field {
+    width: 100%;
+}
+
+.cfg-foot {
+    font-size: 11px;
+    color: var(--ds-text-mute);
+}
+
+/* 入场用 6px 位移而不是纯透明度：浮层要看起来是「从按钮长出来的」，
+   没有位移读者就失去了它属于哪个按钮的线索。 */
+.runtime-pop.is-open {
+    animation: cfgPopIn var(--mo-base) var(--mo-ease) both;
+}
+
+@keyframes cfgPopIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .runtime-pop.is-open { animation: none; }
+}
+
+/* ==========================================================================
+   两列参数行 / 参数输入框
+   踩过的坑：Tailwind 预编译产物里没有 .grid-cols-2（构建期没扫到），
+   模板里写 `grid grid-cols-2` 会静默退化成单列，两个参数框上下堆叠、各占满卡宽，
+   看起来就是几条通栏黑条。结构栅格必须写在这里，不能指望任意值工具类。
+   ========================================================================== */
+.field-row-2 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+@media (max-width: 700px) {
+    .field-row-2 {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.field-input {
+    width: 100%;
+    height: 28px;
+    margin-top: 4px;
+    padding: 0 8px;
+    border: 1px solid var(--ds-border);
+    border-radius: var(--ds-radius-sm);
+    background: var(--ds-bg);
+    color: var(--ds-text);
+    font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    transition: border-color var(--mo-fast) linear, background var(--mo-fast) linear;
+}
+
+.field-input:focus {
+    outline: none;
+    border-color: var(--ds-accent);
+    background: var(--ds-card);
+}
+
+/* 阈值与轮数这类短数字不需要占满整列：输入框拉到 400px 只会让扫读变慢 */
+.field-cell {
+    max-width: 168px;
+}
+
+.field-note {
+    margin-top: 8px;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--ds-text-mute);
+}
+
+/* ==========================================================================
+   模型对比表（models 页主视图）
+   6 个模型是「同构对象 × 多属性」：卡片只能每张重复同一个指标，真正区分它们的
+   AUC / F1 / FPR / 延迟 / 吞吐全被压进各自的详情里，无法横向比较。
+   一张 6 行的表能在一屏内完成对比，卡片做不到。
+   ========================================================================== */
+.cmp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.cmp-table thead th {
+    padding: 8px 12px;
+    text-align: right;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--ds-text-mute);
+    border-bottom: 1px solid var(--ds-border);
+    white-space: nowrap;
+}
+
+.cmp-table thead th:first-child {
+    text-align: left;
+}
+
+.cmp-table tbody td {
+    padding: 9px 12px;
+    text-align: right;
+    color: var(--ds-text-dim);
+    border-bottom: 1px solid var(--ds-border);
+    white-space: nowrap;
+    font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+.cmp-table tbody td:first-child {
+    text-align: left;
+    font-family: inherit;
+    color: var(--ds-text);
+}
+
+.cmp-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.cmp-row {
+    cursor: pointer;
+    transition: background var(--mo-fast) linear;
+}
+
+.cmp-row:hover {
+    background: var(--ds-card-hi);
+}
+
+.cmp-row.is-active {
+    background: var(--ds-accent-soft);
+}
+
+.cmp-row.is-active td:first-child {
+    box-shadow: inset 2px 0 0 var(--ds-accent);
+}
+
+.cmp-name {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.cmp-arch {
+    font-size: 10.5px;
+    font-weight: 400;
+    color: var(--ds-text-mute);
+}
+
+/* 每列最优值。必须带上 td 前缀：`.cmp-table tbody td` 已经给整列定了颜色（0,1,1），
+   只写 `.cmp-best`（0,1,0）会被整列规则覆盖，标了跟没标一样。 */
+.cmp-table tbody td.cmp-best {
+    color: var(--ds-success);
+    font-weight: 600;
+}
+
+/* ==========================================================================
+   实时判定面板（live 页右栏）
+   替换掉原先永远空着的「威胁类型分布」六分类卡：实时链路只出二分类，
+   这里就把二分类的结果画清楚——一条双色占比条 + 三个计数。
+   ========================================================================== */
+.live-split {
+    display: flex;
+    height: 8px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: var(--ds-bg);
+}
+
+.live-split-seg {
+    height: 100%;
+    transition: width var(--mo-slow) var(--mo-ease);
+}
+
+.live-split-seg.is-benign {
+    background: var(--ds-success);
+}
+
+.live-split-seg.is-malware {
+    background: var(--ds-danger);
+}
+
+.live-verdict-counts {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.live-verdict-item {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--ds-border);
+}
+
+.live-verdict-item:last-child {
+    border-bottom: 0;
+}
+
+.live-verdict-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    flex: 0 0 auto;
+    transform: translateY(-2px);
+}
+
+.live-verdict-label {
+    flex: 1 1 auto;
+    font-size: 11.5px;
+    color: var(--ds-text-dim);
+}
+
+.live-verdict-num {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--ds-text);
+    font-variant-numeric: tabular-nums;
+}
+
+/* 这一栏曾经被强制写成 flex: 0 0 auto（按内容高度收起来），理由是「三行数硬撑到
+   660px 只是把内容丢在空白中间」。但左侧画布下方加了 176px 的事件流列表之后，
+   左栏涨到 735px、右栏缩到 280px，两栏落差 455px，比原先的留白更难看。
+   现在回到默认的 stretch：右栏跟左栏齐平，内容在卡里垂直居中，
+   剩下的高度是卡片自己的背景，不是一块突兀的空洞。 */
+
+/* ==========================================================================
+   总览页：系统运行态 + 最近告警
+   ========================================================================== */
+
+.sys-list {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.sys-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12.5px;
+}
+
+.sys-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ds-text-dim);
+}
+
+.sys-value {
+    font-family: var(--ds-font-mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
+    font-variant-numeric: tabular-nums;
+    color: var(--ds-text);
+    text-align: right;
+    /* 缺失模型可能是一串名字，允许在值这一侧折行而不是把卡片撑破 */
+    overflow-wrap: anywhere;
+}
+
+/* 状态点：一处定义，三种色调。没有第四种「成功但需要注意」的中间态，
+   要么 ok 要么 warn，避免颜色语义越加越多。 */
+.sys-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--ds-text-mute);
+    flex: 0 0 auto;
+}
+
+.sys-dot.is-ok { background: var(--ds-success); }
+.sys-dot.is-warn { background: var(--ds-warning); }
+
+/* 实时抓包卡标题里的抓包状态：停止灰、运行绿 + 轻微呼吸。与顶栏 captureState
+   的语义保持一致，但这里只动色与点，文字不换字体（panel-hint 自带等宽灰）。 */
+.live-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.live-status .status-dot {
+    width: 6px;
+    height: 6px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--ds-text-mute);
+    transition: background var(--mo-base) var(--mo-ease);
+}
+
+.live-status.is-running {
+    color: var(--ds-success);
+}
+
+.live-status.is-running .status-dot {
+    background: var(--ds-success);
+    animation: liveDotBreathe 2.2s var(--mo-ease) infinite;
+}
+
+@keyframes liveDotBreathe {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .live-status.is-running .status-dot { animation: none; }
+}
+
+.alert-body {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.alert-list {
+    display: flex;
+    flex-direction: column;
+}
+
+/* 时间 / 来源 / 文件名 / 类别 / 置信度 五列固定轨道：
+   文件名是唯一弹性列（1fr），其余按内容宽度，长文件名走省略号。
+   用 grid 而不是 table，是因为这里不是待排序的数据表，只是一份最近告警的摘要。 */
+.alert-head {
+    display: grid;
+    grid-template-columns: 76px 46px minmax(0, 1fr) 132px 68px;
+    gap: 12px;
+    padding: 0 0 7px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--ds-text-mute);
+    border-bottom: 1px solid var(--ds-border);
+}
+
+.alert-head-right {
+    text-align: right;
+}
+
+.alert-item {
+    display: grid;
+    grid-template-columns: 76px 46px minmax(0, 1fr) 132px 68px;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 0;
+    font-size: 12.5px;
+    border-bottom: 1px solid rgba(34, 44, 58, 0.55);
+}
+
+.alert-item:last-child {
+    border-bottom: 0;
+}
+
+.alert-time {
+    font-family: var(--ds-font-mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
+    font-variant-numeric: tabular-nums;
+    color: var(--ds-text-mute);
+}
+
+.alert-name {
+    color: var(--ds-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.alert-class {
+    color: var(--ds-danger);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.alert-conf {
+    font-family: var(--ds-font-mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
+    font-variant-numeric: tabular-nums;
+    color: var(--ds-text-dim);
+    text-align: right;
+}
+
+.alert-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 22px 12px;
+    text-align: center;
+}
+
+.alert-empty i {
+    font-size: 20px;
+    color: var(--ds-success);
+    opacity: 0.55;
+}
+
+.alert-empty p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--ds-text-dim);
+}
+
+.alert-empty span {
+    font-size: 11.5px;
+    color: var(--ds-text-mute);
+}
+
+/* ==========================================================================
+   环境校准面板（flow 页底部整宽卡）
+   整宽卡里放两栏输入会把每个数字框拉到 500px，说明文字也会拉成一行 1300px
+   的长文，两样都难读。这里把「说明 + 拖拽区」和「参数 + 动作」分成左右两栏：
+   正文限制在 68ch 以内，参数收在 300px 宽的侧栏里。
+   ========================================================================== */
+.calib-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 304px;
+    gap: 18px;
+    align-items: start;
+}
+
+@media (max-width: 1100px) {
+    .calib-body {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.calib-lead {
+    max-width: 68ch;
+    font-size: 11.5px;
+    line-height: 1.7;
+    color: var(--ds-text-mute);
+}
+
+.calib-side {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--ds-border);
+    border-radius: var(--ds-radius-sm);
+    background: var(--ds-bg);
+}
+
+/* ==========================================================================
+   三档分流的空态
+   还没跑过分类时三档全是 0：三个 24px 的 "--" 加三条横贯卡片的进度条槽，
+   在深色底上读起来像三条破折号，而这一列本来就很高。空态整组收起，
+   只留一行说明（.tier-empty），由 flow_impl.js 的 renderTiers 切 is-empty。
+   ========================================================================== */
+#flowTierPanel .tier-empty {
+    display: none;
+    color: var(--ds-text-mute);
+}
+
+#flowTierPanel.is-empty .tier-group {
+    display: none;
+}
+
+#flowTierPanel.is-empty .tier-empty {
+    display: block;
+}
+
+/* ==========================================================================
+   禁用态按钮
+   「开始校准」在还没选文件时是 disabled，但原来只少了 hover 效果，
+   颜色和可用态一样深，看起来像能点。禁用要能一眼看出来。
+   ========================================================================== */
+.btn:disabled,
+.btn[disabled] {
+    opacity: 0.42;
+    cursor: not-allowed;
+    filter: saturate(0.5);
+}
+
+.btn:disabled:hover,
+.btn[disabled]:hover {
+    transform: none;
+}
+
+/* ==========================================================================
+   检测工作台的输入方式切换（上传检测 / 实时抓包）
+   这两块以前是两个整屏页面，来回跳才能对比；现在同页两个子视图，
+   切换器必须足够显眼，否则用户不知道该页还有另一半。
+   ========================================================================== */
+.detect-tabs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px;
+    margin-bottom: 4px;
+    background: var(--ds-card);
+    border: 1px solid var(--ds-border);
+    border-radius: var(--ds-radius);
+}
+
+.detect-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--ds-text-dim);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--ds-radius-sm);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.detect-tab:hover {
+    color: var(--ds-text);
+    background: var(--ds-card-hi);
+}
+
+.detect-tab.is-active {
+    color: var(--ds-accent);
+    background: var(--ds-accent-soft);
+    border-color: var(--ds-accent);
+}
+
+.detect-tab i {
+    font-size: 12px;
+}
+
+.detect-tabs-hint {
+    margin-left: auto;
+    padding-right: 6px;
+    font-size: 11px;
+    color: var(--ds-text-mute);
+}
+
+/* ── 复核中心（/review）的统计条与条数选择 ──────────────────────────
+   四个计数是这一页的「进度感」来源：只知道待复核有多少、不知道处理掉了多少，
+   用户没法判断自己还要不要继续核。 */
+.review-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 76px;
+    padding: 6px 10px;
+    background: var(--ds-bg);
+    border: 1px solid var(--ds-border);
+    border-radius: var(--ds-radius-sm);
+}
+
+.review-stat-label {
+    font-size: 10.5px;
+    line-height: 1.2;
+    color: var(--ds-text-mute);
+}
+
+.review-stat-value {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.2;
+    color: var(--ds-text);
+    font-family: var(--ds-font-mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
+}
+
+.review-stat-value.is-attack { color: var(--ds-danger); }
+.review-stat-value.is-benign { color: var(--ds-success); }
+
+.review-select {
+    padding: 4px 8px;
+    font-size: 12px;
+    color: var(--ds-text);
+    background: var(--ds-bg);
+    border: 1px solid var(--ds-border-strong);
+    border-radius: var(--ds-radius-sm);
+    outline: none;
+}
+
+.review-select:focus {
+    border-color: var(--ds-accent);
+}
+
+/* 复核条目里的来源徽章：上传与实时混在一张队列里，不标来源就看不出这条是从哪来的 */
+.review-item-source {
+    display: inline-block;
+    margin-right: 6px;
+    padding: 0 5px;
+    font-size: 10px;
+    line-height: 1.6;
+    color: var(--ds-accent);
+    background: var(--ds-accent-soft);
+    border-radius: 4px;
+}
+
+/* LLM 建议的单条结论块 */
+.review-ai-row {
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--ds-border);
+}
+
+.review-ai-row:last-child {
+    border-bottom: none;
+}
+
+/* 威胁卡的标题行必须保持单行：hint 一长就把「威胁类型分布」挤成两行（实测出现过）。
+   完整说明已经放进 hint 的 title，这里只做截断。 */
+.threat-panel .panel-title {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.threat-panel .panel-hint {
+    max-width: 62%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* ── 分域投票权重（模型评估页） ─────────────────────────────────────────
+   这张表的重点是「每格有两个信息」：归一化权重（读数）与该域实测指标（依据）。
+   权重用等宽大字，指标压成一行小灰字；权重高低只做很轻的着色提示，
+   因为「权重 1.6 比 0.03 更该被听」这件事应该由数字自己说，而不是靠颜色喊。 */
+.ew-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px 4px;
+}
+
+.ew-toolbar-label {
+    font-size: 11px;
+    color: var(--ds-text-mute);
+    letter-spacing: 0.02em;
+}
+
+.ew-toolbar-note {
+    font-size: 11px;
+    color: var(--ds-text-mute);
+    line-height: 1.6;
+}
+
+.ew-toolbar-note.is-ok { color: var(--ds-success); }
+.ew-toolbar-note.is-err { color: var(--ds-danger); }
+
+.ew-col-sub {
+    display: block;
+    font-size: 9.5px;
+    font-weight: 400;
+    color: var(--ds-text-mute);
+    letter-spacing: 0.01em;
+    margin-top: 2px;
+}
+
+.ew-name {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ds-text);
+    white-space: nowrap;
+}
+
+.ew-cell {
+    line-height: 1.35;
+}
+
+.ew-weight {
+    display: block;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ds-text-dim);
+}
+
+.ew-weight.is-hi { color: var(--ds-success); }
+.ew-weight.is-lo { color: var(--ds-danger); }
+
+.ew-metric {
+    display: block;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px;
+    color: var(--ds-text-mute);
+    white-space: nowrap;
+}
+
+.ew-footnote {
+    padding: 12px 16px 14px;
+    font-size: 10.5px;
+    line-height: 1.75;
+    color: var(--ds-text-mute);
+    border-top: 1px solid var(--ds-border);
+}
+
+.ew-footnote code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: var(--ds-card);
+    color: var(--ds-text-dim);
+}
+
+.ew-loading {
+    padding: 22px 0;
+    text-align: center;
+    font-size: 11.5px;
+    color: var(--ds-text-mute);
+}
+/* 复核队列的多选：只加一个复选框位，不改卡片原有排版 */
+.review-item-check {
+    display: flex;
+    align-items: center;
+    padding-right: 2px;
+    flex: 0 0 auto;
+}
+.review-item-check input {
+    width: 13px;
+    height: 13px;
+    accent-color: var(--ds-accent);
+    cursor: pointer;
+}
+/* 图内视图切换（辐射图 / 桑基图）：和缩放按钮一起靠右上，
+   左侧一整片留给 canvas 自己画的图例与「会话 · 节点」统计。
+   之前把它推到最左，正好压在「正常流量 / 恶意流量」图例上。 */
+.live-flow-toolbar {
+    left: 10px;
+    right: 10px;
+    align-items: flex-start;
+    justify-content: flex-end;
+    gap: 8px;
+}
+.live-flow-view-switch {
+    display: flex;
+    gap: 4px;
+    margin-right: 0;
+}
+.live-flow-view-btn {
+    min-width: 0;
+    padding: 4px 9px;
+    font-size: 11px;
+    letter-spacing: .02em;
+}
+.live-flow-view-btn.is-active {
+    color: var(--ds-accent);
+    border-color: rgba(34, 211, 238, 0.45);
+    background: var(--ds-accent-soft);
+}
+/* 右对齐后不再需要撑开的占位块（留着会把视图切换顶回左侧） */
+.live-flow-toolbar-spacer { display: none; }
+#liveSankeyGraph { position: absolute; inset: 0; }
+/* 工具栏现在横跨整个顶部，必须让空白区域「不接收鼠标」，
+   否则画布顶部的 hover 命中会被它挡住（原来只占右侧一小块，不会）。 */
+.live-flow-toolbar { pointer-events: none; }
+.live-flow-toolbar .live-flow-tool-btn { pointer-events: auto; }
+/* 缩放按钮在桑基图下要藏起来。Tailwind 的 .hidden 是单类选择器，
+   会被上面 .live-flow-tool-btn 的 display: inline-flex 覆盖（styles.css 后加载），
+   所以这里显式提权，否则切到桑基图后 -/1:1/+ 还挂在那儿。 */
+.live-flow-toolbar .live-flow-tool-btn.hidden { display: none !important; }

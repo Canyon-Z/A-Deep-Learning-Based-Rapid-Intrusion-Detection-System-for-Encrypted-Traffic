@@ -39,6 +39,36 @@
         return `HTTP ${statusCode}: ${String(payload)}`;
     };
 
+    /* 「模型效能对比」表格的当前行与状态标签。
+
+       传 null 表示「没有正在使用的单模型」（6 模型投票）：六行全部取消高亮。
+       抽成独立函数是因为它有两个调用方——点某一行（selectModel）和切换检测模式
+       （setVotingModeEnabled）。原先只有前者会动表格，后者只改顶栏读数，于是
+       勾上/取消六模型投票之后表格纹丝不动，必须刷新页面才对齐。 */
+    function applyRowState(modelId) {
+        const models = ['cnn_bilstm', 'classic_cnn', 'lightweight_cnn', 'pure_bilstm', 'mlp', 'transformer'];
+        models.forEach(function(id) {
+            const card = document.getElementById('modelCard-' + id);
+            const tag = document.getElementById('tag-' + id);
+            if (!card || !tag) return;
+            const active = (id === modelId);
+            card.classList.toggle('is-active', active);
+            tag.innerText = active ? '当前使用' : '待命';
+        });
+    }
+
+    /* 真正实现「切到某个模型」，函数声明在 IIFE 内部而不是挂在 window.uploadImpl 上：
+       本文件末尾的 initVotingModeControls() 会立刻调 setVotingModeEnabled()，那时候
+       window.uploadImpl.selectModel 还没赋值（它原先是后定义的）。踩过一次：
+       首次执行抛 TypeError，IIFE 就此中断，后面所有 window.uploadImpl.* 全没挂上，
+       表现是「模型页点行没反应、勾选投票也没反应」，只在模型页可复现。 */
+    function selectModelImpl(modelId, modelName) {
+        const displayName = window.uploadImpl.syncModelSelection(modelId, modelName);
+        applyRowState(modelId);
+        try { window.modelEvalImpl && window.modelEvalImpl.showDetail(modelId); } catch (e) {}
+        return displayName;
+    }
+
     window.uploadImpl.syncModelSelection = function(modelId, modelName) {
         window.currentActiveModel = modelId;
         const modelSelector = document.getElementById('modelSelector');
@@ -56,6 +86,10 @@
         const displayName = modelName || window.getModelDisplayName(modelId);
         const activeModelBadge = document.getElementById('activeModelBadge');
         if (activeModelBadge) activeModelBadge.innerText = displayName + ' 当前使用';
+        // KPI 第 4 格是读数（模型名 + 准确率）。控件搬进顶栏浮层之后，这一格不再有
+        // <select> 替它显示当前值，切模型时必须显式写进去，否则会一直停在模板初值。
+        const currentModelName = document.getElementById('currentModelName');
+        if (currentModelName) currentModelName.innerText = displayName;
         const modelToPrefix = { cnn_bilstm: 'm1', classic_cnn: 'm2', lightweight_cnn: 'm3', pure_bilstm: 'm4', mlp: 'm5', transformer: 'm6' };
         const prefix = modelToPrefix[modelId] || ('m' + (['cnn_bilstm', 'classic_cnn', 'lightweight_cnn', 'pure_bilstm', 'mlp', 'transformer'].indexOf(modelId) + 1));
         // 准确率优先走 stats_panel 缓存下来的 model_metrics.json：
@@ -101,13 +135,35 @@
         if (enabled) {
             window.currentActiveModel = 'ensemble_vote';
             if (activeModelBadge) activeModelBadge.innerText = '6 模型投票';
+            const nameEl = document.getElementById('currentModelName');
+            if (nameEl) nameEl.innerText = '6 模型投票';
             if (statActiveAcc) {
-                statActiveAcc.innerHTML = '--<span class="text-sm text-gray-500">%</span>';
+                // 投票模式没有「单一模型准确率」。之前这里直接写 '--'，顶栏看着像坏了；
+                // 改成显示 6 个模型测试准确率的均值（数据来自 /api/metrics 同步下来的
+                // window.dlidsModelMetrics），没有数据时才回退成 '--'。
+                let avgAcc = null;
+                try {
+                    const mm = window.dlidsModelMetrics || {};
+                    const vals = Object.keys(mm)
+                        .map(function (k) { return parseFloat((mm[k] || {}).test_accuracy); })
+                        .filter(function (v) { return isFinite(v); });
+                    if (vals.length) {
+                        avgAcc = (vals.reduce(function (a, b) { return a + b; }, 0) / vals.length).toFixed(2);
+                    }
+                } catch (e) { avgAcc = null; }
+                statActiveAcc.innerHTML = (avgAcc || '--') + '<span class="text-sm text-gray-500">%</span>';
             }
-            if (selector) selector.value = 'cnn_bilstm';
+            // 投票模式下没有「正在使用的单模型」，六行一律不高亮：否则表格会继续
+            // 指着投票前那一个说「当前使用」，和顶栏的「6 模型投票」自相矛盾。
+            applyRowState(null);
+            // 这里不往 selector 里写默认值。它 disabled 着，显示的应该是用户上次
+            // 选的那个模型——那正是取消投票时该回到的地方；写成固定值等于把用户的
+            // 选择丢掉，取消后就会莫名变成 Pure BiLSTM。
         } else {
-            const fallbackModel = (selector && selector.value) || 'cnn_bilstm';
-            window.uploadImpl.syncModelSelection(fallbackModel, window.getModelDisplayName(fallbackModel));
+            const fallbackModel = (selector && selector.value) || 'pure_bilstm';
+            // 必须走 selectModelImpl 而不是 syncModelSelection：后者只改顶栏读数，
+            // 不动表格的当前行与下方明细，用户看到的就是「取消了投票，表格没反应」。
+            selectModelImpl(fallbackModel, window.getModelDisplayName(fallbackModel));
         }
         // 勾选状态是用户设置：两个分支都要落盘，不能只落「取消」那一边
         try { window.persistUiState && window.persistUiState(); } catch (e) {}
@@ -158,22 +214,9 @@
     // （函数体里对每个控件都有 _boundXxx 标记，重复调用是安全的）。
     window.uploadImpl.initVotingModeControls = initVotingModeControls;
 
-    window.uploadImpl.selectModel = function(modelId, modelName) {
-        const displayName = window.uploadImpl.syncModelSelection(modelId, modelName);
-        const models = ['cnn_bilstm', 'classic_cnn', 'lightweight_cnn', 'pure_bilstm', 'mlp', 'transformer'];
-        models.forEach(id => {
-            const card = document.getElementById('modelCard-' + id);
-            const tag = document.getElementById('tag-' + id);
-            if (!card || !tag) return;
-            const active = (id === modelId);
-            card.classList.toggle('is-active', active);
-            tag.innerText = active ? '当前使用' : '待命';
-        });
-        try { window.modelEvalImpl && window.modelEvalImpl.showDetail(modelId); } catch (e) {}
-        return displayName;
-    };
+    window.uploadImpl.selectModel = selectModelImpl;
 
-    window.uploadImpl.getModelDisplayName = function(modelId) { const map = { cnn_bilstm: 'CNN-BiLSTM', classic_cnn: 'Classic-CNN', lightweight_cnn: 'Lightweight CNN-BiLSTM', pure_bilstm: 'Pure BiLSTM', mlp: 'MLP', transformer: 'Transformer', ensemble_vote: '6-model Majority Vote Ensemble' }; return map[modelId] || modelId; };
+    window.uploadImpl.getModelDisplayName = function(modelId) { const map = { cnn_bilstm: 'CNN-BiLSTM', classic_cnn: 'Classic-CNN', lightweight_cnn: 'Lightweight CNN-BiLSTM', pure_bilstm: 'Pure BiLSTM', mlp: 'MLP', transformer: 'Transformer', ensemble_vote: '6-model Majority Vote Ensemble', cascade: '级联检测' }; return map[modelId] || modelId; };
 
     window.uploadImpl.uploadFilesSequentially = async function(files) {
         const els = getEls();
@@ -198,7 +241,7 @@
     };
 
     window.uploadImpl.uploadFile = async function(file) {
-        const activeModel = window.currentActiveModel || (document.getElementById('modelSelector') && document.getElementById('modelSelector').value) || 'cnn_bilstm';
+        const activeModel = window.currentActiveModel || (document.getElementById('modelSelector') && document.getElementById('modelSelector').value) || 'pure_bilstm';
         window.currentActiveModel = activeModel;
         const formData = new FormData(); formData.append('file', file); formData.append('model_type', activeModel);
         // 代码审查第 35 条：包级判定阈值可选下发（留空/非法值不发，后端用默认值）；

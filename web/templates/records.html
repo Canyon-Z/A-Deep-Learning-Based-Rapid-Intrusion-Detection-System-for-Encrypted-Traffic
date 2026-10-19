@@ -3,6 +3,17 @@
 {% block content %}
 <div class="grid-12">
     <div class="col-12">
+        {# 缺陷 L2 / 验收报告：/records 没有后端 API，数据全在浏览器 localStorage。
+           页面必须自己说清这一点，否则用户会把「清缓存后记录消失」当成丢数据。 #}
+        <div class="mb-3 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-200">
+            <span class="mt-0.5 shrink-0 font-mono text-[11px] uppercase tracking-wide opacity-80">存储</span>
+            <span>
+                本页记录<b>只保存在当前浏览器</b>（localStorage），不写入服务端数据库。
+                换设备、换浏览器、清理站点数据或使用无痕模式都会让记录消失；
+                服务端只保留最近一次检测的接口响应，<b>没有</b>历史记录查询接口。
+                需要留档请自行导出。
+            </span>
+        </div>
         {% with result_title='全部检测记录', result_hint='上传与实时抓包合并显示，按时间倒序', result_mode='all', result_clear_label='清除全部' %}
             {% include "partials/results_table.html" %}
         {% endwith %}

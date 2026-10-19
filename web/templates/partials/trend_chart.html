@@ -1,19 +1,26 @@
-<!-- Traffic Trend -->
-<div id="trendChartPanel" class="panel h-[360px] flex flex-col">
+<!-- Traffic Trend
+     最小高度 360px，实际高度跟随所在行（.grid-12 的 stretch），与同行卡片底边对齐。
+     图例色必须与 upload_trend_impl.js 里的 series 颜色取同一组值（--ds-chart-*）。
+     这里曾经写的是 var(--ds-accent)：图例是一个青色方块，而折线画的是绿色。 -->
+<div id="trendChartPanel" class="panel flex flex-col">
     <div class="panel-head">
         <h2 class="panel-title">
             <i class="fa-solid fa-chart-line text-cyber-primary mr-2"></i>流量监测趋势
         </h2>
         <div class="flex items-center gap-4 text-xs text-gray-400">
             <span class="flex items-center gap-1.5">
-                <span class="w-2 h-2 rounded-sm" style="background: var(--ds-accent);"></span>正常流量
+                <span class="w-2 h-2 rounded-sm" style="background: var(--ds-chart-normal);"></span>正常流量
             </span>
             <span class="flex items-center gap-1.5">
-                <span class="w-2 h-2 rounded-sm" style="background: var(--ds-danger);"></span>恶意流量
+                <span class="w-2 h-2 rounded-sm" style="background: var(--ds-chart-malware);"></span>恶意流量
             </span>
         </div>
     </div>
     <div class="p-4 pt-1 flex-1 min-h-0">
-        <div id="lineChart" class="w-full h-full"></div>
+        <!-- data-trend-scope 标明这张折线图画的是哪一路数据（upload）。合并成「检测工作台」之后
+             页面上只剩这一个 #lineChart 容器，live_trend_impl 原本靠「页面里没有 #liveFlowGraph
+             就不画」来避免串台，而实时子视图里恰好有 #liveFlowGraph，守卫失效 —— 实时数据会盖掉
+             上传趋势。现在由这个属性明确归属，两边按 scope 判断。 -->
+        <div id="lineChart" class="w-full h-full" data-trend-scope="upload"></div>
     </div>
 </div>

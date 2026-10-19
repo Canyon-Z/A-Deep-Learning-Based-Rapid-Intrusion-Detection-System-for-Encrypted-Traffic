@@ -7,13 +7,13 @@
     <!-- Tailwind CSS（本地预编译副本）
          CDN 版一旦不可达，栅格、任意值类与响应式前缀会静默失效——整个布局会塌成单列，
          而且浏览器只会报一个网络错误，看不出是样式问题。这里改为构建期产物，彻底去掉运行时依赖。 -->
-    <link rel="stylesheet" href="/static/vendor/tailwind.css?v=20260602b">
+    <link rel="stylesheet" href="/static/vendor/tailwind.css?v=20261103f">
     <!-- Font Awesome（本地副本，理由同上：图标字体也是 CDN 依赖，断了就全变方框） -->
-    <link rel="stylesheet" href="/static/vendor/fontawesome/css/all.min.css?v=20260602b">
+    <link rel="stylesheet" href="/static/vendor/fontawesome/css/all.min.css?v=20261103f">
     <!-- ECharts（本地副本，避免 jsdelivr 不可达时所有图表失效） -->
     <script src="/static/vendor/echarts.min.js"></script>
 
-    <link rel="stylesheet" href="/static/css/styles.css?v=20260604b">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20261103f">
 
     <!-- 侧栏收起状态必须在首次绘制之前落到 <html> 上：
          放到 body 末尾执行的话，整页会先按 232px 画一遍、再跳回收起的 64px（明显闪一下）。 -->

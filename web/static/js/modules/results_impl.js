@@ -7,6 +7,100 @@
     const MAX_PERSIST_BYTES = 3 * 1024 * 1024; // localStorage 中该 key 序列化后的字节上限：3 MB
     const PERSIST_DEBOUNCE_MS = 300; // debounce writes to localStorage
     const PERSIST_BACKOFF_MS = 60 * 1000; // backoff on quota error
+    const SERVER_SYNC_DEBOUNCE_MS = 1500; // debounce writes to /api/records（比本地写慢一档，减少请求量）
+
+    // ---- 服务端持久化（缺口 L2）----
+    // 检测记录原先只存在 localStorage：换机器、换浏览器、清站点数据就全丢，
+    // 也无法把一次演练的记录交给别人复核。后端已补 /api/records（每用户一个 JSON），
+    // 这里负责上行同步与下行回填；接口不可用时静默退回纯本地模式。
+    let serverSyncTimer = null;
+    let serverSyncInFlight = false;
+    let serverSyncPending = null;
+
+    function scheduleServerSync(json) {
+        serverSyncPending = json;
+        if (serverSyncTimer) return;
+        serverSyncTimer = setTimeout(function() {
+            serverSyncTimer = null;
+            const payload = serverSyncPending;
+            serverSyncPending = null;
+            if (!payload || serverSyncInFlight) return;
+            serverSyncInFlight = true;
+            try {
+                fetch('/api/records', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: payload
+                }).then(function(r) {
+                    if (!r.ok) return null;
+                    return r.json();
+                }).then(function(res) {
+                    if (res && res.ok) window.resultsImpl._serverRecordsAt = res.updated_at || null;
+                }).catch(function() { /* 离线/未登录：只用本地存储 */ })
+                  .finally(function() { serverSyncInFlight = false; });
+            } catch (e) {
+                serverSyncInFlight = false;
+            }
+        }, SERVER_SYNC_DEBOUNCE_MS);
+    }
+
+    // 页面初始化时把服务端记录拉回来：本地为空、或服务端更新时间更晚，都以服务端为准。
+    // 拉回后写进 localStorage 再走一遍 restoreRecordStores，让所有下游（趋势图、去重集合、
+    // 卡片收敛）与刷新前完全一致。
+    window.resultsImpl.pullRecordStoresFromServer = function() {
+        try {
+            if (typeof fetch !== 'function') return;
+            fetch('/api/records', { credentials: 'same-origin' })
+                .then(function(r) { return r.ok ? r.json() : null; })
+                .then(function(data) {
+                    if (!data || data.storage !== 'server') return;
+                    const live = Array.isArray(data.live) ? data.live : [];
+                    const upload = Array.isArray(data.upload) ? data.upload : [];
+                    if (!live.length && !upload.length) return;
+                    const localRaw = (window.localStorage && window.localStorage.getItem)
+                        ? window.localStorage.getItem(RECORDS_STORAGE_KEY) : null;
+                    const localCount = localRaw ? localRaw.length : 0;
+                    const serverCount = JSON.stringify({ live: live, upload: upload }).length;
+                    // 本地与服务端谁更全：先看条数（更直观），条数相同再看字节。
+                    // 只比字节会被「本地裁剪后仍较长」骗过去，导致服务端拿不回来。
+                    let localRecords = 0;
+                    if (localRaw) {
+                        try {
+                            const parsedLocal = JSON.parse(localRaw);
+                            localRecords = (Array.isArray(parsedLocal.live) ? parsedLocal.live.length : 0)
+                                + (Array.isArray(parsedLocal.upload) ? parsedLocal.upload.length : 0);
+                        } catch (parseLocalErr) { localRecords = 0; }
+                    }
+                    const serverRecords = live.length + upload.length;
+                    if (localRaw && serverRecords < localRecords) return;
+                    if (localRaw && serverRecords === localRecords && serverCount <= localCount) return;
+                    const merged = JSON.stringify({ live: live.slice(-MAX_PERSIST_RECORDS_PER_KIND), upload: upload.slice(-MAX_PERSIST_RECORDS_PER_KIND) });
+                    try { window.localStorage.setItem(RECORDS_STORAGE_KEY, merged); } catch (e) { return; }
+                    window.resultsImpl.restoreRecordStores();
+                    try { window.resultsImpl.renderRecordedRows(); } catch (e2) { /* 不在记录页时无表格 */ }
+                    // 趋势折线用的是同一批记录：只重画表格会出现「表格里有数据、曲线上一个点都没有」，
+                    // 刷新页面后尤其明显（recordStores 是这一刻才从服务端拉回来的）。
+                    // 总览页（mode='all'）画「上传 + 实时」合并曲线，且不把合并条数写回上传计数。
+                    try {
+                        const stores = window.recordStores || {};
+                        const upList = Array.isArray(stores.upload) ? stores.upload : [];
+                        const liveList = Array.isArray(stores.live) ? stores.live : [];
+                        const mergedTrend = String(window.recordTableMode || '') === 'all';
+                        if (window.uploadTrendImpl && typeof window.uploadTrendImpl.restoreFromRecords === 'function') {
+                            window.uploadTrendImpl.restoreFromRecords(
+                                mergedTrend ? upList.concat(liveList) : upList,
+                                { mergeStats: mergedTrend, statsRecords: upList }
+                            );
+                        }
+                        if (!mergedTrend && window.liveTrendImpl && typeof window.liveTrendImpl.restoreFromRecords === 'function') {
+                            window.liveTrendImpl.restoreFromRecords(liveList);
+                        }
+                    } catch (e3) { /* 趋势图不在当前页面 */ }
+                })
+                .catch(function() { /* 接口不可用：纯本地模式 */ });
+        } catch (e) { /* ignore */ }
+    };
 
     // HTML 转义：优先复用 core/utils.js 的 Utils.escapeHtml（main.js 在加载本文件之前已加载 core/utils.js），
     // 若工具模块尚未就绪则本地兜底，保证任何路径下都不会把未转义的外部数据拼进 innerHTML。
@@ -96,10 +190,14 @@
 
             window.recordStores = window.recordStores || { live: [], upload: [] };
 
-            if (!(window.localStorage && window.localStorage.setItem)) return;
-
-            // 先按条数 + 字节双重上限裁剪，再写入
+            // 服务端（cache/records 下的 JSON 文件）是权威存储，localStorage 只是本机快照。
+            // 必须先同步服务端：原来把 scheduleServerSync 放在 setItem 成功之后，
+            // 一旦记录变大触发 QuotaExceededError，本地和服务端会一起丢 ——
+            // 这正是「切页/刷新后记录消失」的根因。两条路径互不影响。
             const json = buildPersistableJson();
+            try { scheduleServerSync(json); } catch (syncErr) { /* 服务端不可用时只用本地 */ }
+
+            if (!(window.localStorage && window.localStorage.setItem)) return;
             try {
                 window.localStorage.setItem(RECORDS_STORAGE_KEY, json);
                 // clear any prior backoff
@@ -150,6 +248,60 @@
             // 恢复侧沿用原内存上限（MAX_RECORDS_PER_KIND=500），300 条只是“写盘”上限，不改动原有内存语义
             window.recordStores.upload = restoredUpload.slice(-MAX_RECORDS_PER_KIND);
             window.recordStores.live = restoredLive.slice(-MAX_RECORDS_PER_KIND);
+            // 恢复出来的实时记录先按「每个连接一条最新」收敛。
+            // 后端 LiveFlowTracker 以双向五元组为键，一条连接空闲超时后重开会覆盖上一段，
+            // 所以「威胁类型分布」卡片永远是每连接一条；而落盘的是历史上每一次出现。
+            // 不收敛的话，刷新之后表格行数会比卡片多出几十上百行。
+            try {
+                const store = window.recordStores.live || [];
+                if (store.length > 1) {
+                    const byConn = new Map();
+                    store.forEach((item) => {
+                        const d = item && item.data;
+                        if (!d) return;
+                        const a = String(d.src || d.src_ip || d.src_addr || '0');
+                        const b = String(d.dst || d.dst_ip || d.dst_addr || '0');
+                        const ap = Number(d.sport || d.src_port) || 0;
+                        const bp = Number(d.dport || d.dst_port) || 0;
+                        const proto = String(d.proto || d.protocol || '');
+                        const k = a <= b ? a + ':' + ap + '>' + b + ':' + bp + '|' + proto
+                                         : b + ':' + bp + '>' + a + ':' + ap + '|' + proto;
+                        byConn.set(k, item);   // Map 保留首次插入的位置，值取最新
+                    });
+                    if (byConn.size && byConn.size !== store.length) {
+                        window.recordStores.live = Array.from(byConn.values());
+                    }
+                }
+            } catch (compactErr) {
+                console.warn('resultsImpl.restoreRecordStores: 收敛实时记录失败', compactErr);
+            }
+            // 恢复记录之后必须把渲染去重集合一并重建。
+            // pollLive 用 window._liveSeen 判重（键是「五元组@采集时刻」），而刷新后它是个空 Set：
+            // 已经恢复出来的那批行对去重逻辑来说是「没见过的」，后端下一轮全量返回会把它们
+            // 原样再插一遍，记录表当场翻倍。这里用恢复出来的行把键补回去。
+            try {
+                const seen = new Set();
+                (window.recordStores.live || []).forEach((item) => {
+                    const d = item && item.data;
+                    if (!d) return;
+                    seen.add(String(d.src || '0') + ':' + (d.sport || 0) + '->' + String(d.dst || '0') + ':' + (d.dport || 0)
+                        + '@' + Math.floor((Number(d.captured_at) || 0) * 1000));
+                });
+                window._liveSeen = seen;
+            } catch (rebuildErr) {
+                console.warn('resultsImpl.restoreRecordStores: 重建实时去重集合失败', rebuildErr);
+            }
+            // 卡片明细收敛到「记录表里实际还在的连接」。
+            // 记录表是很早就开始累积并持久化的，卡片明细是后加的——两者起点不同，
+            // 卡片会保留记录表里已经清空/被上限挤掉的连接，看起来就是「卡片和检测记录对不上」。
+            // 只对 live 做：上传记录是按文件一行，没有五元组，套用这个过滤会把卡片全清掉。
+            try {
+                if (typeof window.dlidsPruneThreatFlowsToConnections === 'function') {
+                    window.dlidsPruneThreatFlowsToConnections('live');
+                }
+            } catch (pruneErr) {
+                console.warn('resultsImpl.restoreRecordStores: 收敛威胁类型计数失败', pruneErr);
+            }
         } catch (e) {
             console.warn('resultsImpl.restoreRecordStores failed', e);
         }
@@ -157,7 +309,9 @@
 
     window.resultsImpl.normalizeDetailPayload = function(data) {
         const d = data && typeof data === 'object' ? data : {};
-        return { name: d.name || '', statusText: d.statusText || d.status || d.confidence_label || d.result || '', conf: d.conf || d.confidence || '0', execTime: d.execution_time || d.execTime || d.duration_ms || d.time_ms || '-', captureTime: d.capture_time || d.captureTime || d.timestamp || '', imageData: d.imageData || d.image_data || d.image || d.visualization || d.visualization_data || '', payloadDist: d.payloadDist || d.payload_dist || d.payload_distribution || d.histogram || null, flows: Array.isArray(d.flows) ? d.flows : [], flowsTotal: Number.isFinite(Number(d.flows_total)) ? Number(d.flows_total) : (Array.isArray(d.flows) ? d.flows.length : 0), flowsTruncated: !!d.flows_truncated, sessionParseReport: d.sessionParseReport || d.session_parse_report || d.parse_report || d.session_report || null };
+        // 展开原对象：详情弹窗还要用 ensemble_weighting / distribution / reliability 渲染
+        // 「投票加权」取证块，白名单只挑 11 个字段会把它们全丢掉。
+        return { ...d, name: d.name || '', statusText: d.statusText || d.status || d.confidence_label || d.result || '', conf: d.conf || d.confidence || '0', execTime: d.execution_time || d.execTime || d.duration_ms || d.time_ms || '-', captureTime: d.capture_time || d.captureTime || d.timestamp || '', imageData: d.imageData || d.image_data || d.image || d.visualization || d.visualization_data || '', payloadDist: d.payloadDist || d.payload_dist || d.payload_distribution || d.histogram || null, flows: Array.isArray(d.flows) ? d.flows : [], flowsTotal: Number.isFinite(Number(d.flows_total)) ? Number(d.flows_total) : (Array.isArray(d.flows) ? d.flows.length : 0), flowsTruncated: !!d.flows_truncated, sessionParseReport: d.sessionParseReport || d.session_parse_report || d.parse_report || d.session_report || null };
     };
 
     window.resultsImpl.formatConfidenceText = function(value) {
@@ -224,9 +378,9 @@
 
     window.resultsImpl.escapeSvgText = function(text) { return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;'); };
 
-    window.resultsImpl.showDetails = function(name, result, conf, execTime, captureTime, imageData, payloadDist, flows, sessionParseReport) {
+    window.resultsImpl.showDetails = function(name, result, conf, execTime, captureTime, imageData, payloadDist, flows, sessionParseReport, extra) {
         if (window.modalHelpers && typeof window.modalHelpers.showDetails === 'function') {
-            return window.modalHelpers.showDetails(name, result, conf, execTime, captureTime, imageData, payloadDist, flows, sessionParseReport);
+            return window.modalHelpers.showDetails(name, result, conf, execTime, captureTime, imageData, payloadDist, flows, sessionParseReport, extra);
         }
         console.warn('resultsImpl.showDetails placeholder');
         alert('详情弹窗未初始化，请刷新页面后重试。');
@@ -249,9 +403,29 @@
             row.className = 'border-b border-cyber-border/50 mo-row-new';
             setTimeout(() => row.classList.remove('mo-row-new'), 460);
             const status = data && data.status ? String(data.status) : '-';
-            const isMal = status.includes('Malicious') || status.includes('Malware');
-            row.dataset.recordType = isMal ? 'malware' : 'benign';
-            const displayConf = data && (data.confidence || data.conf) ? (parseFloat(data.confidence || data.conf) * 100).toFixed(2) : '-';
+            // 分布外协议门控（后端 reliability=out_of_domain）：这类结果既不是恶意也不是良性，
+            // 必须单独呈现，否则会以绿色 Benign 误导用户以为流量安全。
+            const isOod = status.includes('Out-of-Distribution') || (data && data.reliability === 'out_of_domain');
+            // 分布外的具体原因（协议族命中 / 像素分布偏离 / 两者都中）由后端拼好放在
+            // reliability_reason，直接挂到「分布外」单元格的 title 上 —— 用户不必点开
+            // 详情才知道「为什么这个判定不可信」。
+            const oodReason = (data && (data.reliability_reason || data.reliabilityReason)) || '';
+            const oodTitle = escapeHtml(oodReason || '该协议族不在模型训练分布内，结论不可采信');
+            const isMal = !isOod && (status.includes('Malicious') || status.includes('Malware'));
+            row.dataset.recordType = isMal ? 'malware' : (isOod ? 'ood' : 'benign');
+            // 置信度必须是「判定那一类的概率」。实时链路后端只下发 malware_conf（恶意概率），
+            // 判 Benign 时它是 0.16 实际意味着良性置信度 0.84 —— 原样当置信度显示，
+            // 就把「模型很确定这是正常」读成「模型拿不准」，实时页那些 16% 全是这个误会。
+            const _pickConf = (() => {
+                if (!data) return null;
+                const mc = Number(data.malware_conf);
+                if (data.malware_conf !== null && data.malware_conf !== undefined && isFinite(mc)) {
+                    return isMal ? mc : (1 - mc);
+                }
+                const v = parseFloat(data.confidence || data.conf);
+                return isFinite(v) ? v : null;
+            })();
+            const displayConf = _pickConf === null ? '-' : (_pickConf * 100).toFixed(2);
             function formatDuration(d) { try { if (!d || typeof d !== 'object') return '-'; if (typeof d.execution_time === 'string' && d.execution_time.trim()) return d.execution_time; if (typeof d.elapsed_time === 'string' && d.elapsed_time.trim()) return d.elapsed_time; const msKeys = ['elapsed_ms', 'processing_time_ms', 'duration_ms', 'elapsed']; const sKeys = ['duration_s', 'processing_time_s', 'elapsed_s']; for (const k of msKeys) if (k in d && typeof d[k] === 'number') return (d[k] >= 1000 ? (d[k] / 1000).toFixed(2) + ' s' : d[k].toFixed(2) + ' ms'); for (const k of sKeys) if (k in d && typeof d[k] === 'number') return d[k].toFixed(2) + ' s'; if ('time_ms' in d && typeof d.time_ms === 'number') return (d.time_ms/1000).toFixed(2) + ' s'; if (typeof d.execution_time === 'number') return d.execution_time >= 1000 ? (d.execution_time/1000).toFixed(2) + ' s' : d.execution_time.toFixed(2) + ' ms'; const possibleKeys = ['execution_time', 'executionTime', 'elapsed', 'duration', 'time']; for (const k of possibleKeys) if (k in d && typeof d[k] === 'string' && d[k].trim()) return d[k].trim(); } catch (e) {} return '-'; }
             const durationText = formatDuration(data);
             const rawModelName = data && (data.model_name || data.detected_model_name || data.model || data.detected_model || data.model_type)
@@ -263,9 +437,29 @@
             window.__rowIdSeq = (window.__rowIdSeq || 0) + 1;
             const rowId = 'row_' + Date.now() + '_' + window.__rowIdSeq;
             window.__detailsDataMap = window.__detailsDataMap || {};
-            window.__detailsDataMap[rowId] = window.resultsImpl.normalizeDetailPayload(Object.assign({ rowId, name, size, time, statusText: isMal ? 'Malware' : 'Benign', conf: data && (data.confidence || data.conf || data.malware_conf) ? String(data.confidence || data.conf || data.malware_conf) : '0', }, data || {}));
+            window.__detailsDataMap[rowId] = window.resultsImpl.normalizeDetailPayload(Object.assign({ rowId, name, size, time, statusText: isMal ? 'Malware' : (isOod ? 'Out-of-Distribution' : 'Benign'), conf: data && (data.confidence || data.conf || data.malware_conf) ? String(data.confidence || data.conf || data.malware_conf) : '0', }, data || {}));
             function protoToName(p) { if (p === null || p === undefined || p === '') return '-'; const n = Number(p); const map = { 1: 'ICMP', 6: 'TCP', 17: 'UDP', 41: 'IPv6', 47: 'GRE', 50: 'ESP', 51: 'AH', 89: 'OSPF' }; if (Number.isFinite(n) && map[n]) return map[n] + ' (' + n + ')'; return String(p); }
-            const displaySize = (size && size !== '-' && size !== null && size !== undefined) ? size : (data && (data.size || data.bytes || data.length) ? (data.size || data.bytes || data.length) : (data && (data.proto || data.protocol) ? protoToName(data.proto || data.protocol) : '-'));
+            // 「大小」列只放真实数据量。之前在没有 size 时回退到协议名，实时流的每一行都
+            // 显示成「TCP (6)」，和表头「大小」对不上，整行看上去就是错位的。
+            const displaySize = (size && size !== '-' && size !== null && size !== undefined) ? size : (data && (data.size || data.bytes || data.length) ? (data.size || data.bytes || data.length) : '-');
+            // 「AI 分析」只给实时抓包里的恶意行：那条链路才有活跃流可查（tracker 里的
+            // 78 维特征），上传检测的行对应的是磁盘上的 pcap，流早就没了。
+            // 判定沿用外部评估的结论——二元模型报恶意时才值得花一次 LLM 调用。
+            let liveExplainBtn = '';
+            if (recordKind === 'live' && isMal) {
+                const f0 = ((data && (data.flows || data.session_flows)) || [])[0] || {};
+                const fSrcIp = f0.src_ip || f0.src || f0.sip || '';
+                const fDstIp = f0.dst_ip || f0.dst || f0.dip || '';
+                if (fSrcIp && fDstIp) {
+                    liveExplainBtn = '<button type="button" class="ml-3 text-cyber-warning hover:text-white transition-colors text-sm underline live-explain-btn"'
+                        + ' data-src-ip="' + escapeHtml(fSrcIp) + '"'
+                        + ' data-src-port="' + escapeHtml(f0.src_port || f0.sport || 0) + '"'
+                        + ' data-dst-ip="' + escapeHtml(fDstIp) + '"'
+                        + ' data-dst-port="' + escapeHtml(f0.dst_port || f0.dport || 0) + '"'
+                        + ' data-proto="' + escapeHtml(f0.proto || f0.protocol || 6) + '"'
+                        + ' title="让本地 LLM 解释这条流的特征偏离">AI 分析</button>';
+                }
+            }
             // 外部数据（文件名 name、时间 time、耗时、大小/协议、模型名、置信度、rowId）一律先 escapeHtml 再插值，
             // 只转义插值数据，模板里的 <td>/<button>/class 等结构标签保持原样。
             // mode='all' 的表格比单路表格多一列「来源」，用于区分这一行是上传检测还是实时抓包
@@ -273,12 +467,22 @@
                 ? `<td class="px-6 py-4">${recordKind === 'live' ? '<span class="src-badge is-live">实时</span>' : '<span class="src-badge">上传</span>'}</td>`
                 : '';
             row.dataset.recordSource = recordKind;
-            row.innerHTML = `<td class="px-6 py-4 font-mono text-white truncate max-w-[200px]" title="${escapeHtml(name)}">${escapeHtml(name)}</td>` + sourceTd + `<td class="px-6 py-4 text-gray-400">${escapeHtml(time)}</td>` + `<td class="px-6 py-4 font-mono text-cyan-400">${escapeHtml(durationText)}</td>` + `<td class="px-6 py-4 text-gray-400">${escapeHtml(displaySize)}</td>` + `<td class="px-6 py-4">${isMal ? '<span class="text-cyber-danger">Malware</span>' : '<span class="text-cyber-success">Benign</span>'}</td>` + `<td class="px-6 py-4 text-gray-300">${escapeHtml(modelName)}</td>` + `<td class="px-6 py-4 font-mono text-cyber-primary">${escapeHtml(displayConf)}%</td>` + `<td class="px-6 py-4"><button type="button" data-row-id="${escapeHtml(rowId)}" class="text-gray-400 hover:text-white transition-colors text-sm underline view-details-btn">详情</button></td>`;
+            row.innerHTML = `<td class="px-6 py-4 font-mono text-white truncate max-w-[200px]" title="${escapeHtml(name)}">${escapeHtml(name)}</td>` + sourceTd + `<td class="px-6 py-4 text-gray-400">${escapeHtml(time)}</td>` + `<td class="px-6 py-4 font-mono text-cyan-400">${escapeHtml(durationText)}</td>` + `<td class="px-6 py-4 text-gray-400">${escapeHtml(displaySize)}</td>` + `<td class="px-6 py-4">${isMal ? '<span class="text-cyber-danger">Malware</span>' : (isOod ? '<span class="text-cyber-warning cursor-help" title="${oodTitle}">分布外</span>' : '<span class="text-cyber-success">Benign</span>')}</td>` + `<td class="px-6 py-4 text-gray-300 whitespace-nowrap">${escapeHtml(modelName)}</td>` + `<td class="px-6 py-4 font-mono text-cyber-primary">${escapeHtml(displayConf)}%</td>` + `<td class="px-6 py-4 whitespace-nowrap"><button type="button" data-row-id="${escapeHtml(rowId)}" class="text-gray-400 hover:text-white transition-colors text-sm underline view-details-btn">详情</button>${liveExplainBtn}</td>`;
             // 插入真实记录前先移除空态占位行（colspan 单元格）：
             // 否则“暂无…记录”的提示会一直残留在表格底部，与真实数据同时显示
             const placeholder = tbody.querySelector('tr > td[colspan]');
             if (placeholder && placeholder.parentNode) placeholder.parentNode.remove();
             tbody.insertBefore(row, tbody.firstChild);
+            // 新行插入后必须立刻遵守当前分类过滤。
+            // 否则停在「恶意」分区时，之后批量跑出来的 benign 行会先显示在这一区里，
+            // 直到用户手动切一次分类按钮才被 applyRecordFilter 收掉 —— 表现为分区串味。
+            const activeFilter = String(window.currentRecordFilter || 'all').toLowerCase();
+            if (activeFilter !== 'all') {
+                const recType = String(row.dataset.recordType || '').toLowerCase();
+                const visible = (activeFilter === 'benign' && (recType === 'benign' || recType === 'ood'))
+                    || (activeFilter === 'malware' && recType === 'malware');
+                row.style.display = visible ? '' : 'none';
+            }
             return rowId;
         } catch (e) { console.warn('resultsImpl.addResultRow failed', e); return 'row_stub_' + Date.now(); }
     };
@@ -288,8 +492,89 @@
             const map = window.__detailsDataMap || {};
             const d = window.resultsImpl.normalizeDetailPayload(map[rowId] || {});
             if (!d) { alert('未找到该检测结果的详情数据，请重新执行一次检测。'); return; }
-            window.resultsImpl.showDetails(d.name || rowId, d.statusText || d.status || '-', window.resultsImpl.formatConfidenceText(d.confidence || d.conf), window.resultsImpl.formatExecTime(d.execTime || d.processing_time_ms || d.duration_ms || d.elapsed_ms || d.time_ms), window.resultsImpl.formatCaptureTime(d.captureTime || d.captured_at || d.timestamp || d.time), d.imageData || d.image || d.visualization || '', d.payloadDist || d.payload_dist || d.histogram || null, d.flows || d.session_flows || d.records || [], d.sessionParseReport || d.session_parse_report || d.session_report || null);
+            // 第 10 个参数把整条详情对象再传一遍：弹窗要用 ensemble_weighting / distribution / reliability
+            // 渲染「投票加权」取证块，这些字段不在前 9 个位置参数里。
+            window.resultsImpl.showDetails(d.name || rowId, d.statusText || d.status || '-', window.resultsImpl.formatConfidenceText(d.confidence || d.conf), window.resultsImpl.formatExecTime(d.execTime || d.processing_time_ms || d.duration_ms || d.elapsed_ms || d.time_ms), window.resultsImpl.formatCaptureTime(d.captureTime || d.captured_at || d.timestamp || d.time), d.imageData || d.image || d.visualization || '', d.payloadDist || d.payload_dist || d.histogram || null, d.flows || d.session_flows || d.records || [], d.sessionParseReport || d.session_parse_report || d.session_report || null, d);
         } catch (e) { console.warn('resultsImpl.openDetails error', e); try { alert('显示详情时出错: ' + (e && e.message ? e.message : String(e))); } catch(_){} }
+    };
+
+    /* ---- 实时流的 LLM 辅助解释 -------------------------------------------------
+       面板用右下角浮层而不是弹窗：实时页每秒都在进新记录，弹窗会一直挡着表格。
+       只解释、不判定——判定权在二元模型和六分类模型手里。 */
+    function ensureLiveAiPanel() {
+        let el = document.getElementById('liveAiPanel');
+        if (el) return el;
+        el = document.createElement('div');
+        el.id = 'liveAiPanel';
+        el.className = 'hidden';
+        el.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:9998;width:420px;max-width:calc(100vw - 40px);'
+            + 'background:rgba(17,24,39,0.97);border:1px solid rgba(34,211,238,0.35);border-radius:10px;'
+            + 'box-shadow:0 12px 36px rgba(0,0,0,0.55);padding:14px 16px;font-size:13px;line-height:1.65;color:#cbd5e1;';
+        el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'
+            + '<span style="color:#22d3ee;font-weight:600;"><i class="fa-solid fa-robot" style="margin-right:6px;"></i>AI 辅助分析</span>'
+            + '<button type="button" id="liveAiClose" style="color:#94a3b8;background:none;border:none;cursor:pointer;font-size:16px;line-height:1;">&times;</button>'
+            + '</div>'
+            + '<div id="liveAiMeta" style="color:#64748b;font-size:11px;margin-bottom:8px;"></div>'
+            + '<div id="liveAiContent" style="white-space:pre-wrap;word-break:break-word;"></div>'
+            + '<div style="color:#475569;font-size:11px;margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08);">'
+            + 'LLM 辅助分析，仅供参考，不参与判定</div>';
+        document.body.appendChild(el);
+        el.querySelector('#liveAiClose').addEventListener('click', function () { el.classList.add('hidden'); });
+        return el;
+    }
+
+    // 本地小模型未必守得住「不要 markdown」这条约束（实测仍会输出 **加粗**），
+    // 而面板是 whitespace-pre-wrap，星号会原样显示。这里兜底剥掉。
+    function stripMarkdown(s) {
+        return String(s == null ? '' : s)
+            .replace(/\*\*([^*]+)\*\*/g, '$1')
+            .replace(/__([^_]+)__/g, '$1')
+            .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1$2')
+            .replace(/^#{1,6}\s+/gm, '')
+            .replace(/`([^`]+)`/g, '$1')
+            .replace(/^\s*[-*+]\s+/gm, '')
+            .replace(/^\s*\d+\.\s+/gm, '')
+            .trim();
+    }
+
+    window.resultsImpl.showLiveExplain = async function (btn) {
+        const panel = ensureLiveAiPanel();
+        const meta = panel.querySelector('#liveAiMeta');
+        const content = panel.querySelector('#liveAiContent');
+        panel.classList.remove('hidden');
+        meta.innerText = '正在请求本地 LLM…';
+        content.innerText = '';
+        try {
+            const resp = await fetch('/api/live/explain', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    src_ip: btn.getAttribute('data-src-ip'),
+                    src_port: Number(btn.getAttribute('data-src-port') || 0),
+                    dst_ip: btn.getAttribute('data-dst-ip'),
+                    dst_port: Number(btn.getAttribute('data-dst-port') || 0),
+                    proto: Number(btn.getAttribute('data-proto') || 6)
+                })
+            });
+            const j = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                meta.innerText = '';
+                content.innerText = (j.error || ('请求失败 HTTP ' + resp.status))
+                    + (j.hint ? '\n' + j.hint : '')
+                    + (j.detail ? '\n' + (Array.isArray(j.detail) ? j.detail.join('\n') : j.detail) : '');
+                return;
+            }
+            const c = j.classification || {};
+            meta.innerText = '流 ' + (j.flow ? (j.flow.src_ip + ':' + j.flow.src_port + ' → ' + j.flow.dst_ip + ':' + j.flow.dst_port) : '')
+                + ' | ' + (c.predicted || '-') + ' ' + ((c.confidence || 0) * 100).toFixed(2) + '%'
+                + ' | 档位 ' + (c.tier || '-')
+                + (c.is_unknown ? ' | 未知攻击' : '')
+                + ' | ' + (j.model || '') + ' ' + (j.elapsed || '');
+            content.innerText = stripMarkdown(j.content) || '（无内容）';
+        } catch (e) {
+            meta.innerText = '';
+            content.innerText = '请求异常：' + (e && e.message ? e.message : String(e));
+        }
     };
 
     window.resultsImpl.bindDetailButtonEvents = function() {
@@ -298,7 +583,11 @@
             if (!tbody || tbody._detailClickBound) return;
             tbody._detailClickBound = true;
             tbody.addEventListener('click', function(ev) {
-                const btn = ev.target && ev.target.closest ? ev.target.closest('.view-details-btn') : null;
+                const target = ev.target && ev.target.closest ? ev.target : null;
+                if (!target) return;
+                const aiBtn = target.closest('.live-explain-btn');
+                if (aiBtn) { window.resultsImpl.showLiveExplain(aiBtn); return; }
+                const btn = target.closest('.view-details-btn');
                 if (!btn) return;
                 const rowId = btn.getAttribute('data-row-id');
                 if (rowId) window.openDetails && window.openDetails(rowId);
@@ -394,6 +683,14 @@
 
             window.currentRecordFilter = 'all';
             window.resultsImpl.persistRecordStores();
+
+            // 威胁类型分布卡片必须跟着一起清：它的计数来自按连接持久化的逐流明细
+            // （dlids_threat_flows_upload），不清的话会出现「记录表空了、卡片还挂着 N 个连接」。
+            // dlidsClearThreatFlows 还会记下清除时刻，让之后到达的旧流不再被收进来。
+            if (typeof window.dlidsClearThreatFlows === 'function') {
+                window.dlidsClearThreatFlows('upload');
+            }
+
             try { if (typeof window.persistUiState === 'function') window.persistUiState(); } catch (e) {}
         } catch (e) {
             console.warn('resultsImpl.clearUploadRecords failed', e);
@@ -415,9 +712,38 @@
                 if (payload && payload.liveCapture) delete window.__detailsDataMap[key];
             });
 
+            // 威胁类型分布卡片必须跟着一起清：它的计数和明细现在按连接持久化在
+            // dlids_threat_flows_live 里，留着的话会出现「表格清空了、卡片还挂着 N 个连接」。
+            // 这一路比上传页还多一层麻烦：实时页每 1.5 秒轮询，后端每次都返回全部流，
+            // 不清掉清除时刻的话下一轮就把同一批流灌回来。dlidsClearThreatFlows 负责记时刻。
+            if (typeof window.dlidsClearThreatFlows === 'function') {
+                window.dlidsClearThreatFlows('live');
+            }
+
             if (window.liveTrendImpl && typeof window.liveTrendImpl.resetTrendChart === 'function') {
                 window.liveTrendImpl.resetTrendChart();
             }
+
+            // 顶部 KPI 的数字来自后端 capture_stats，只清前端表格的话，
+            // 下一轮 1.5 秒轮询立刻又把同一个数画回来 —— 看起来就是「没清掉」。
+            // 先把本地聚合清零并立刻重画，再请后端把统计一起复位。
+            try {
+                if (window.dlidsStats) {
+                    window.dlidsStats.live = { sessions: 0, malware: 0 };
+                    window.dlidsStats.threats = {};
+                }
+                if (typeof window.dlidsRenderStats === 'function') window.dlidsRenderStats();
+            } catch (e) {}
+
+            try {
+                fetch('/api/live/stats/reset', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    keepalive: true
+                }).then(function (r) { return r.ok ? r.json() : null; }).then(function () {
+                    if (typeof window.dlidsRenderStats === 'function') window.dlidsRenderStats();
+                }).catch(function () {});
+            } catch (e) {}
 
             window.resultsImpl.persistRecordStores();
             try { if (typeof window.persistUiState === 'function') window.persistUiState(); } catch (e) {}
@@ -480,7 +806,9 @@
             rows.forEach((row) => {
                 const type = (row.dataset && row.dataset.recordType) ? String(row.dataset.recordType).toLowerCase() : '';
                 let show = finalFilter === 'all';
-                if (!show) show = (finalFilter === 'benign' && type === 'benign');
+                // 「正常」分区把分布外(ood)一起收进来：它不是恶意结论，单独丢在「全部」里
+                // 会让两个分区的条数之和永远小于全部，看起来像丢数据。
+                if (!show) show = (finalFilter === 'benign' && (type === 'benign' || type === 'ood'));
                 if (!show) show = (finalFilter === 'malware' && type === 'malware');
                 row.style.display = show ? '' : 'none';
             });
@@ -506,6 +834,24 @@
 
     // Restore persisted records early so tab switching can render cached history after refresh.
     window.resultsImpl.restoreRecordStores();
+    // 本地恢复之后再异步拉一次服务端（服务端有、本地没有时回填），不阻塞首屏。
+    try { setTimeout(function() { window.resultsImpl.pullRecordStoresFromServer(); }, 0); } catch (e) { /* ignore */ }
     window.resultsImpl.bindClearButtons();
+
+    // 关页/刷新时把最后一次状态直接送进服务端。
+    // debounce 是 300 + 1500ms，用户在记录写入后立刻刷新会正好落在窗口里丢掉一条；
+    // sendBeacon 在页面卸载后仍能发出，且不阻塞卸载。
+    try {
+        window.addEventListener('pagehide', function() {
+            try {
+                if (!navigator.sendBeacon) return;
+                const stores = window.recordStores || { live: [], upload: [] };
+                if (!(stores.live && stores.live.length) && !(stores.upload && stores.upload.length)) return;
+                const json = buildPersistableJson();
+                const blob = new Blob([json], { type: 'application/json' });
+                navigator.sendBeacon('/api/records', blob);
+            } catch (e) { /* 卸载阶段失败无所谓，服务端已有前一次快照 */ }
+        });
+    } catch (e) { /* ignore */ }
 
 })();

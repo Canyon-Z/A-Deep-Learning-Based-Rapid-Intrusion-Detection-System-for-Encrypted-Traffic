@@ -1,0 +1,70 @@
+<!-- 环境校准：换环境后让模型重新适应本环境。
+     为什么单独一块而不塞进上传区：它解决的不是「这一批判得准不准」，而是
+     「模型还认不认得这个环境」。跨数据集实测过，源域模型的检出率换环境后是 0%，
+     而 500~1000 条本环境标注 + 8 轮微调能回到 97%，两者的操作节奏完全不同。
+     布局：左栏是「说明 + 拖拽区」（读），右栏是「参数 + 动作」（调）。
+     整宽单栏会让说明拉成 1300px 的长行、数字框拉到 500px，两样都难读。 -->
+<div id="flowCalibratePanel" class="panel flex flex-col">
+    <div class="panel-head">
+        <h2 class="panel-title">
+            <i class="fa-solid fa-sliders text-cyber-primary mr-2"></i>环境校准
+        </h2>
+        <span class="panel-hint">换环境后重新适应</span>
+    </div>
+
+    <div class="p-4 flex-1 calib-body">
+        <div class="flex flex-col gap-3">
+            <p class="calib-lead">
+                模型在同源数据上准确率很高，但换到未见过的新环境后检出率会大幅下降。
+                上传本环境带 <span class="font-mono text-gray-300">Label</span> 列的一批流特征 CSV
+                （建议 500~1000 行），系统会用它在现役权重上微调，产出本环境专用模型。
+            </p>
+
+            <div id="flowCalibDropZone"
+                 class="glass-card calib-dropzone relative overflow-hidden cursor-pointer flex flex-col items-center justify-center text-center px-4 py-5">
+                <div class="scan-line"></div>
+                <input type="file" id="flowCalibFileInput" class="hidden" accept=".csv">
+                <div id="flowCalibContent" class="flex flex-col items-center">
+                    <span class="w-9 h-9 rounded-full flex items-center justify-center mb-2"
+                          style="background: var(--ds-accent-soft);">
+                        <i class="fa-solid fa-database text-[15px] text-cyber-primary"></i>
+                    </span>
+                    <p id="flowCalibFileName" class="text-[13px] font-medium text-gray-100">拖拽标注 CSV，或点击选择</p>
+                    <p class="text-[10px] text-gray-500 mt-1 font-mono">必须含 Label 列</p>
+                </div>
+                <div id="flowCalibLoading" class="hidden flex flex-col items-center py-2 w-full">
+                    <div class="w-6 h-6 border-2 border-cyber-border rounded-full animate-spin mb-2"
+                         style="border-top-color: var(--ds-accent);"></div>
+                    <p class="text-xs text-gray-300">正在微调…</p>
+                </div>
+            </div>
+
+            <p id="flowCalibMessage" class="text-[11px] text-gray-600 leading-relaxed"></p>
+        </div>
+
+        <div class="calib-side">
+            <div class="field-row-2">
+                <label class="block">
+                    <span class="text-[11px] text-gray-500">微调轮数</span>
+                    <input id="flowCalibEpochs" type="number" min="1" max="50" step="1" value="8"
+                           class="field-input">
+                </label>
+                <label class="block">
+                    <span class="text-[11px] text-gray-500">留出比例</span>
+                    <input id="flowCalibHoldout" type="number" min="0.05" max="0.5" step="0.05" value="0.2"
+                           class="field-input">
+                </label>
+            </div>
+
+            <label class="flex items-center gap-2 text-[11px] text-gray-400 cursor-pointer select-none">
+                <input id="flowCalibActivate" type="checkbox"
+                       class="rounded" style="accent-color: var(--ds-accent);">
+                指标不降时自动启用新权重
+            </label>
+
+            <button id="flowCalibRunBtn" class="btn btn-primary btn-sm" disabled>
+                <i class="fa-solid fa-wand-magic-sparkles mr-1.5"></i>开始校准
+            </button>
+        </div>
+    </div>
+</div>

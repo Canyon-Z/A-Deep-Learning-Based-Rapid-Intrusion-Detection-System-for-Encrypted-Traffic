@@ -127,7 +127,7 @@ uvicorn web.backend.main:app --host 0.0.0.0 --port 8000
 | CNN-BiLSTM | `cnn_bilstm.py` | 主力模型，CNN 提取局部特征 + BiLSTM 捕捉时序上下文 |
 | Classic CNN | `classic_cnn.py` | 纯三层 Conv1d 基线，无 RNN 结构 |
 | Lightweight CNN-BiLSTM | `lightweight_cnn_bilstm.py` | CNN-BiLSTM 的轻量版，参数量约为标准版的 1/5 |
-| Pure BiLSTM | `main.py` 内嵌 | 纯 BiLSTM，28 行作为 28 个时间步 |
+| Pure BiLSTM | `pure_bilstm.py` | 纯 BiLSTM，28 行作为 28 个时间步 |
 | MLP | `mlp.py` | 三层全连接 + BatchNorm + Dropout |
 | Transformer | `transformer.py` | Transformer 编码器 + 位置编码 |
 
@@ -150,6 +150,11 @@ Transformer 的阈值设置较低（0.35），因为它在当前数据集上输�
 | `--no-cache` | False | 禁用特征缓存 |
 | `--rebuild-cache` | False | 强制重建缓存 |
 | `--device` | auto | 训练设备：auto/cpu/cuda |
+
+> 模型结构以 `src/training/run_training_all.py` 里的实例化参数与实际产出的
+> `checkpoints/*.pth` 为准。Transformer 当前是 `d_model=64, nhead=4, num_layers=2,
+> dropout=0.3`（早期文档里写的 128/8/4 从未落地）。改结构必须重新训练，
+> 否则 `load_state_dict` 会因形状不匹配失败。
 
 ## 许可证
 

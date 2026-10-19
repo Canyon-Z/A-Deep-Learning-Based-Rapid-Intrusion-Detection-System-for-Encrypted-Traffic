@@ -19,7 +19,7 @@
         malwareCount: 0,
         trendLabels: [], benignTrend: [], malwareTrend: [],
         chartInstances: { lineChart: null, pieChart: null, flowGraph: null, modalBarChart: null },
-        modelConfig: { currentModel: 'cnn_bilstm', modelMap: { 'cnn_bilstm': 'CNN_BiLSTM', 'classic_cnn': 'Classic_CNN', 'lightweight': 'Lightweight_CNN_BiLSTM', 'lightweight_cnn': 'Lightweight_CNN_BiLSTM', 'pure_bilstm': 'Pure_BiLSTM', 'mlp': 'MLP', 'transformer': 'Transformer' } },
+        modelConfig: { currentModel: 'pure_bilstm', modelMap: { 'cnn_bilstm': 'CNN_BiLSTM', 'classic_cnn': 'Classic_CNN', 'lightweight': 'Lightweight_CNN_BiLSTM', 'lightweight_cnn': 'Lightweight_CNN_BiLSTM', 'pure_bilstm': 'Pure_BiLSTM', 'mlp': 'MLP', 'transformer': 'Transformer' } },
         config: { maxRecordsPerType: 500, maxTrendPoints: 50, pollIntervalMs: 1500, autoSave: true }
     };
 

@@ -39,9 +39,10 @@
     var MAX_RENDER_EDGES = 90;
     var MAX_FLOW_LIST_ROWS = 60;
     var HIT_NODE = 14;
-    var HIT_EDGE = 8;
+    var HIT_EDGE = 10;
     var IDLE_FRAME_MS = 1000 / 30;        // 无数据时 30fps 足够（只有静态空态）
     var ALERT_MS = 620;                   // 恶意告警扩散环只画一次，持续 620ms
+    var GROW_MS = 620;                    // 新会话的连线「生长」时长：与告警环同源，节奏一致
     var TAU = Math.PI * 2;
 
     var COLOR_OK = '34, 211, 238';
@@ -142,6 +143,28 @@
     }
 
     /* --------------------------- 数据聚合（高频，无需逐帧） --------------------------- */
+    // 同一条流会被反复送进来：轮询每轮都重发可见的全量流，页面刷新后又会拿本地记录重放一次。
+    // 没有去重的话节点/边的 bytes、count 会被重复累加，图上的粗细和数字会随时间虚假膨胀，
+    // 所以这里给每条流算一个稳定标识，只让第一次真正入库。
+    var ingestedKeys = new Set();
+    var ingestedKeyOrder = [];
+    var MAX_INGESTED_KEYS = 10000;
+
+    function flowKey(f) {
+        if (f.id !== null && f.id !== undefined && f.id !== '') return 'id:' + f.id;
+        return 'fp:' + f.src + '|' + f.sport + '|' + f.dst + '|' + f.dport + '|'
+            + (f.protocol == null ? '' : f.protocol) + '|' + Math.floor(f.capturedAt * 1000) + '|' + f.bytes;
+    }
+
+    function markIngested(key) {
+        ingestedKeys.add(key);
+        ingestedKeyOrder.push(key);
+        if (ingestedKeyOrder.length > MAX_INGESTED_KEYS) {
+            var old = ingestedKeyOrder.shift();
+            if (old !== undefined) ingestedKeys.delete(old);
+        }
+    }
+
     function ingest(flows) {
         var now = Date.now();
         var list = Array.isArray(flows) ? flows : [];
@@ -150,6 +173,9 @@
         for (var i = 0; i < list.length; i++) {
             var f = normalizeFlow(list[i]);
             if (!f) continue;
+            var fk = flowKey(f);
+            if (ingestedKeys.has(fk)) continue;
+            markIngested(fk);
             normalized.push(f);
 
             var pairKey = f.src < f.dst ? f.src + '|' + f.dst : f.dst + '|' + f.src;
@@ -183,7 +209,7 @@
             bumpNode(f.dst, f.bytes, f.malicious, now);
         }
 
-        if (!normalized.length) return;
+        if (!normalized.length) return 0;
 
         // 过期清理：低频做，逐帧不做
         pruneStores(now);
@@ -194,6 +220,7 @@
 
         layoutDirty = true;
         renderFlowList(trackedFlows);
+        return normalized.length;
     }
 
     function bumpNode(ip, bytes, malicious, now) {
@@ -264,11 +291,24 @@
             }
             slots.sort(function (a, b) { return a.angle - b.angle; });
 
-            // 同环相邻角度太近时做一次最小推开，避免节点重叠
-            var minGap = TAU / Math.max(n, 1) * 0.55;
+            // 同环相邻角度太近时做一次最小推开，避免节点重叠。
+            // 推开后整圈可能「绕回」起点再次压在一起（20+ 个节点时必现），
+            // 所以最后统一缩放到 0.98 圈以内：宁可节点略挤，也不能让两条射线落在同一方向。
+            var minGap = TAU / Math.max(n, 1);
             for (var m = 1; m < slots.length; m++) {
                 var gap = slots[m].angle - slots[m - 1].angle;
                 if (gap < minGap) slots[m].angle = slots[m - 1].angle + minGap;
+            }
+            if (slots.length > 1) {
+                var span = slots[slots.length - 1].angle - slots[0].angle;
+                var limit = TAU * 0.98;
+                if (span > limit) {
+                    var scale = limit / span;
+                    var origin = slots[0].angle;
+                    for (var s = 0; s < slots.length; s++) {
+                        slots[s].angle = origin + (slots[s].angle - origin) * scale;
+                    }
+                }
             }
 
             for (var j = 0; j < slots.length; j++) {
@@ -277,9 +317,20 @@
                 var x = center.x + Math.cos(item.angle) * radius;
                 var y = center.y + Math.sin(item.angle) * radius;
                 var nodeRadius = 3 + Math.min(5, Math.log10(nd2.bytes + 10) * 1.3);
+                // 首见时间写在 nodeStore 的条目上（nd2 是同一对象引用），
+                // place() 每次布局都重建 node 对象，bornAt 必须从这里继承，
+                // 否则每次重排都会重新播一遍入场动画。
+                if (!nd2.bornAt) nd2.bornAt = Date.now();
+                // 新布局算出来的是「目标位置」。如果这个对端上一帧就在画面上，
+                // 就从它当前的位置开始往目标走（见 settlePositions），
+                // 否则每来一条新流，整张图上的点都会瞬间跳到新位置——非常生硬。
+                var prevNode = anim['n:' + nd2.ip];
+                var startX = (prevNode && isFinite(prevNode.x)) ? prevNode.x : x;
+                var startY = (prevNode && isFinite(prevNode.y)) ? prevNode.y : y;
                 var node = {
                     ip: nd2.ip,
-                    x: x, y: y,
+                    x: startX, y: startY,
+                    tx: x, ty: y,
                     radius: nodeRadius,
                     local: nd2.local,
                     malicious: nd2.malicious,
@@ -287,6 +338,7 @@
                     count: nd2.count,
                     alertAt: nd2.alertAt,
                     lastSeen: nd2.lastSeen,
+                    bornAt: nd2.bornAt,
                     angle: item.angle,
                     ring: ringIndex
                 };
@@ -307,6 +359,16 @@
         keys.sort(function (a, b) { return (edgeStore[b].bytes + edgeStore[b].count * 512) - (edgeStore[a].bytes + edgeStore[a].count * 512); });
         keys = keys.slice(0, MAX_RENDER_EDGES);
 
+        // 同一对端可能有多条会话（不同服务端口）：完全共线会被看成一加粗的线，
+        // 这里给同 peer 的边按序号分配一条横向偏移，画成一组平行细线。
+        var peerEdgeCount = {};
+        for (var pk = 0; pk < keys.length; pk++) {
+            var pe = edgeStore[keys[pk]];
+            var peerKeyTmp = isPrivateIp(pe.src) ? pe.dst : pe.src;
+            peerEdgeCount[peerKeyTmp] = (peerEdgeCount[peerKeyTmp] || 0) + 1;
+        }
+        var peerEdgeIndex = {};
+
         for (var r = 0; r < keys.length; r++) {
             var e = edgeStore[keys[r]];
             var srcLocal = isPrivateIp(e.src);
@@ -315,6 +377,26 @@
             if (!peer) continue;
             var weight = Math.log10(e.bytes + 10);
             var period = Math.max(900, 2400 - weight * 260);   // 数据量越大，脉冲跑得越快
+
+            var siblings = peerEdgeCount[peerIp] || 1;
+            var seq = (peerEdgeIndex[peerIp] || 0);
+            peerEdgeIndex[peerIp] = seq + 1;
+            var dx = peer.x - center.x;
+            var dy = peer.y - center.y;
+            // 同一对端的多条会话：如果只做横向平移，几条长线会并成一束平行的
+            // 「一大坨」，越靠近圆心越糊。改成在 peer 周围把终点散成扇形，
+            // 总张角固定（≈26°），条目越多单条越细，视觉上始终是一束有层次的射线。
+            var baseAngle = Math.atan2(dy, dx);
+            var spread = siblings > 1 ? Math.min(0.46, 0.075 * siblings + 0.06) : 0;
+            var ang = siblings > 1
+                ? baseAngle + (seq - (siblings - 1) / 2) * (spread / Math.max(1, siblings - 1))
+                : baseAngle;
+            var tipR = (peer.radius || 5) + 5;
+            var x1 = center.x + Math.cos(ang) * 6;
+            var y1 = center.y + Math.sin(ang) * 6;
+            var x2 = peer.x - Math.cos(ang) * tipR;
+            var y2 = peer.y - Math.sin(ang) * tipR;
+
             edges.push({
                 key: e.key,
                 lastSeen: e.lastSeen,
@@ -331,10 +413,16 @@
                 width: Math.max(1, Math.min(4, 1 + weight * 0.55)),
                 period: period,
                 phase: (hashString(e.key) % 1000) / 1000,
-                x1: center.x, y1: center.y,
-                x2: peer.x, y2: peer.y,
+                x1: x1, y1: y1,
+                x2: x2, y2: y2,
                 peerIp: peerIp,
-                alertAt: e.alertAt
+                alertAt: e.alertAt,
+                // 端点不是一次性算死的：节点会平滑滑动（见 settlePositions），
+                // 每帧要按当前节点位置重算端点，否则线与点会脱开。
+                ang: ang,
+                tipR: tipR,
+                // 首次进入画面的时间，用来做「生长」动画（见 drawEdges）
+                bornAt: e.bornAt || (e.bornAt = Date.now())
             });
         }
 
@@ -402,13 +490,48 @@
         cw = w;
         ch = h;
         dpr = ratio;
-        canvas.width = pxW;
-        canvas.height = pxH;
+        // 只在尺寸真的变了才写回 canvas.width / canvas.height。
+        // 给这两个属性赋值会立刻清空画布（以及 2D 上下文状态），而 ensureCanvas() 每 1.5s
+        // 随轮询调用一次；过去无条件赋值＝每轮清屏一次，观感就是辐射图定时闪一下。
+        if (changed) {
+            canvas.width = pxW;
+            canvas.height = pxH;
+            layoutDirty = true;
+        }
         canvas.dataset.livegraphLastW = String(w);
         canvas.dataset.livegraphLastH = String(h);
 
-        if (changed) layoutDirty = true;
         return changed;
+    }
+
+    /* 每帧把节点从当前位置往目标位置收一点，并同步重算边端点。
+       布局本身是按「目标位置」算的；不插值的话，只要新增一条流触发重排，
+       所有节点都会瞬移，观感上就是「点和线一下子蹦出来」。 */
+    function settlePositions() {
+        if (!layout) return;
+        var nodes = layout.nodes;
+        for (var i = 0; i < nodes.length; i++) {
+            var n = nodes[i];
+            if (n.tx == null || n.ty == null) continue;
+            n.x += (n.tx - n.x) * 0.18;
+            n.y += (n.ty - n.y) * 0.18;
+            // 够近就直接吸附，避免永远差一点点导致每帧都在重算
+            if (Math.abs(n.tx - n.x) < 0.35 && Math.abs(n.ty - n.y) < 0.35) {
+                n.x = n.tx;
+                n.y = n.ty;
+            }
+        }
+        var c = layout.center;
+        var edges = layout.edges;
+        for (var j = 0; j < edges.length; j++) {
+            var e = edges[j];
+            var peer = layout.nodeByIp[e.peerIp];
+            if (!peer || e.ang == null) continue;
+            e.x1 = c.x + Math.cos(e.ang) * 6;
+            e.y1 = c.y + Math.sin(e.ang) * 6;
+            e.x2 = peer.x - Math.cos(e.ang) * (e.tipR || 8);
+            e.y2 = peer.y - Math.sin(e.ang) * (e.tipR || 8);
+        }
     }
 
     function drawFrame(ts) {
@@ -421,6 +544,7 @@
         }
 
         if (layoutDirty || !layout) rebuildLayout(cw, ch);
+        settlePositions();
 
         var hasData = layout.nodes.length > 0;
         // 空态是静态的，30fps 足够，别为了一个静止的点跑满帧
@@ -446,8 +570,13 @@
         ctx.translate(state.panX, state.panY);
         ctx.scale(state.scale, state.scale);
 
-        drawEdges(ts);
-        drawNodes(ts);
+        // 动画时间基准必须和「出生时间」一致：ingest() 里用 Date.now() 记
+        // bornAt / alertAt，而 rAF 回调拿到的 ts 是 performance.now()（页面加载从 0 起），
+        // 两者相差一个 epoch。混用会让 ts - bornAt 恒为大负数，
+        // 于是生长动画、入场缩放、告警环全都不触发 —— 观感就是「线和点一下子蹦出来」。
+        var clock = Date.now();
+        drawEdges(clock);
+        drawNodes(clock);
 
         ctx.restore();
 
@@ -457,6 +586,7 @@
 
     function drawEdges(ts) {
         var hover = chartDom._hover || {};
+        var hasHoverEdge = !!hover.edgeKey;
         for (var i = 0; i < layout.edges.length; i++) {
             var e = layout.edges[i];
             var isHover = hover.edgeKey === e.key;
@@ -466,12 +596,45 @@
             var idleAlpha = e.malicious ? 0.55 : 0.32;
             var alpha = isHover ? 0.95 : (fresh ? idleAlpha : idleAlpha * 0.34);
 
+            // 盯着某条线时把其余线压暗：一屏几十条射线时，光靠加粗分不出在看哪一条
+            if (hasHoverEdge && !isHover) alpha *= 0.24;
+
+            // 生长动画：新会话从圆心长到对端，而不是整条瞬间出现。
+            // easeOutCubic 让开头快、收尾慢，视觉上像「探出去」而不是「弹出来」。
+            var grow = 1;
+            if (e.bornAt) {
+                var bornAge = ts - e.bornAt;
+                if (bornAge >= 0 && bornAge < GROW_MS) {
+                    var gk = bornAge / GROW_MS;
+                    grow = 1 - Math.pow(1 - gk, 3);
+                    alpha *= (0.30 + 0.70 * grow);
+                }
+            }
+            var tipX = e.x1 + (e.x2 - e.x1) * grow;
+            var tipY = e.y1 + (e.y2 - e.y1) * grow;
+
             ctx.strokeStyle = 'rgba(' + rgb + ', ' + alpha + ')';
             ctx.lineWidth = isHover ? e.width + 0.8 : (fresh ? e.width : Math.max(1, e.width - 0.6));
             ctx.beginPath();
             ctx.moveTo(e.x1, e.y1);
-            ctx.lineTo(e.x2, e.y2);
+            ctx.lineTo(tipX, tipY);
             ctx.stroke();
+
+            // 被指到的那条线加一层外发光：线只有 1~4px，靠颜色区分不够
+            if (isHover) {
+                ctx.save();
+                ctx.shadowColor = 'rgba(' + rgb + ', 0.85)';
+                ctx.shadowBlur = 12;
+                ctx.strokeStyle = 'rgba(' + rgb + ', 0.5)';
+                ctx.beginPath();
+                ctx.moveTo(e.x1, e.y1);
+                ctx.lineTo(tipX, tipY);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            // 还没长满时不画箭头与脉冲，否则标记会浮在半空
+            if (grow < 1) continue;
 
             // 方向：连线靠近对端处画一个静态箭头，表示这条会话的主方向
             drawDirectionMark(e, rgb, alpha);
@@ -573,23 +736,30 @@
             var rgb = n.malicious ? COLOR_BAD : COLOR_OK;
             var fresh = (ts - (n.lastSeen || 0)) < FRESH_NODE_MS;
 
-            ctx.fillStyle = 'rgba(' + rgb + ', ' + (isHover ? 1 : (fresh ? 0.88 : 0.48)) + ')';
+            // 入场：从 0.4 倍半径放大到 1 倍，同时淡入，末尾带一点过冲。
+            // 不加这个的话，新对端是「啪」地整颗出现在画面上的，和线条的生长节奏不一致。
+            var bornAge = n.bornAt ? (ts - n.bornAt) : 1e9;
+            var nk = Math.max(0, Math.min(1, bornAge / GROW_MS));
+            var pop = 0.40 + 0.60 * (1 - Math.pow(1 - nk, 3)) + 0.18 * Math.sin(Math.PI * nk);
+            if (nk < 0.02) continue;               // 刚出生这一帧先不画，避免零点闪现
+
+            ctx.fillStyle = 'rgba(' + rgb + ', ' + (isHover ? 1 : (fresh ? 0.88 : 0.48)) * nk + ')';
             ctx.beginPath();
-            ctx.arc(n.x, n.y, NODE_HIT_VISUAL(n, isHover, fresh), 0, TAU);
+            ctx.arc(n.x, n.y, NODE_HIT_VISUAL(n, isHover, fresh) * pop, 0, TAU);
             ctx.fill();
 
             if (n.malicious) {
                 // 恶意节点用静态双环标识，不用无限脉冲
-                ctx.strokeStyle = 'rgba(' + COLOR_BAD + ', 0.55)';
+                ctx.strokeStyle = 'rgba(' + COLOR_BAD + ', ' + 0.55 * nk + ')';
                 ctx.lineWidth = 1.2;
                 ctx.beginPath();
-                ctx.arc(n.x, n.y, n.radius + 3.5, 0, TAU);
+                ctx.arc(n.x, n.y, (n.radius + 3.5) * pop, 0, TAU);
                 ctx.stroke();
             } else if (isHover) {
                 ctx.strokeStyle = 'rgba(' + COLOR_OK + ', 0.6)';
                 ctx.lineWidth = 1.2;
                 ctx.beginPath();
-                ctx.arc(n.x, n.y, n.radius + 3.5, 0, TAU);
+                ctx.arc(n.x, n.y, (n.radius + 3.5) * pop, 0, TAU);
                 ctx.stroke();
             }
 
@@ -602,7 +772,9 @@
             }
 
             // 陈旧节点仍保留标签（记录要看得见），但节点多时只标活跃与悬停项，避免糊成一片
-            if (showAllLabels || isHover || (fresh && layout.nodes.length <= 24)) drawNodeLabel(n, isHover, fresh);
+            if (nk >= 0.55 && (showAllLabels || isHover || (fresh && layout.nodes.length <= 24))) {
+                drawNodeLabel(n, isHover, fresh);
+            }
         }
     }
 
@@ -678,32 +850,121 @@
     }
 
     /* --------------------------- 列表 --------------------------- */
+    // 列表用增量更新而不是每次整段 innerHTML 重建：轮询每 1.5s 来一次，
+    // 全量重建会让「实时明细」每次都重排、滚动条回跳，看起来就是定时闪烁。
+    var flowListKeys = [];
+    var flowListCount = -1;
+    var FLOW_COL_HEAD = '<div class="flow-head-row">'
+        + '<span>时间</span><span>对端</span><span>协议</span><span class="flow-bytes">字节</span><span>判定</span>'
+        + '</div>';
+
+    function flowRowKey(f) {
+        return [f.src, f.sport, f.dst, f.dport, f.protocol == null ? '' : f.protocol, f.capturedAt, f.malicious ? 1 : 0].join('|');
+    }
+
+    function flowRowHtml(f) {
+        var d = new Date(f.capturedAt * 1000);
+        var time = pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+        // captured_at 若带小数（毫秒精度）才补毫秒；后端给整数秒时避免出现恒为 .000 的尾巴
+        if (f.capturedAt % 1 !== 0) time += '.' + pad3(d.getMilliseconds());
+        var sport = f.sport === '' ? '' : ':' + f.sport;
+        var dport = f.dport === '' ? '' : ':' + f.dport;
+        var verdict = f.malicious
+            ? '<span class="flow-verdict is-bad">Malware</span>'
+            : '<span class="flow-verdict is-ok">Normal</span>';
+        return '<div class="flow-row">'
+            + '<span class="flow-time">' + time + '</span>'
+            + '<span class="flow-peer" title="' + escapeHtml(f.src + sport + ' → ' + f.dst + dport) + '">' + escapeHtml(f.src + sport) + ' → ' + escapeHtml(f.dst + dport) + '</span>'
+            + '<span class="flow-proto">' + escapeHtml(protoToName(f.protocol)) + '</span>'
+            + '<span class="flow-bytes">' + (f.bytes > 0 ? formatBytes(f.bytes) : '—') + '</span>'
+            + verdict
+            + '</div>';
+    }
+
+    function flowListCountHtml(total) {
+        return total + ' 条' + (total > MAX_FLOW_LIST_ROWS ? ' · 仅显示最近 ' + MAX_FLOW_LIST_ROWS + ' 条' : '');
+    }
+
+    function flowListHeadHtml(total) {
+        return '<div class="flow-list-head">'
+            + '<span class="flow-list-title">实时明细</span>'
+            + '<span class="flow-list-count">' + flowListCountHtml(total) + '</span>'
+            + '</div>';
+    }
+
     function renderFlowList(flows) {
         var listDom = document.getElementById('liveFlowList');
         if (!listDom) return;
         var list = Array.isArray(flows) ? flows : [];
         if (!list.length) {
-            listDom.innerHTML = '<p class="text-sm text-gray-400 px-2 py-1">暂无实时流量</p>';
+            if (flowListCount === 0) return;
+            listDom.innerHTML = '<p class="flow-empty">暂无实时流量</p>';
+            flowListKeys = [];
+            flowListCount = 0;
             return;
         }
+
         var recent = list.slice().reverse().slice(0, MAX_FLOW_LIST_ROWS);
-        var html = '';
+        var rows = [];
         for (var i = 0; i < recent.length; i++) {
             var f = normalizeFlow(recent[i]);
             if (!f) continue;
-            var time = new Date(f.capturedAt * 1000).toLocaleTimeString('zh-CN');
-            var cls = f.malicious ? 'text-cyber-danger' : 'text-gray-300';
-            var sport = f.sport === '' ? '' : ':' + f.sport;
-            var dport = f.dport === '' ? '' : ':' + f.dport;
-            html += '<div class="px-2 py-1 text-xs ' + cls + ' border-b border-cyber-border/20">'
-                + time + '  ' + escapeHtml(f.src + sport) + ' → ' + escapeHtml(f.dst + dport)
-                + (f.malicious ? '  <span class="font-bold">Malware</span>' : '')
-                + '</div>';
+            rows.push({ key: flowRowKey(f), html: flowRowHtml(f) });
         }
-        if (list.length > MAX_FLOW_LIST_ROWS) {
-            html += '<div class="px-2 py-1 text-xs text-gray-500">仅显示最近 ' + MAX_FLOW_LIST_ROWS + ' / ' + list.length + ' 条</div>';
+        var wantKeys = [];
+        for (var wi = 0; wi < rows.length; wi++) wantKeys.push(rows[wi].key);
+
+        var rowsDom = listDom.querySelector('.flow-rows');
+
+        // ① 行集合完全一致：只同步计数文本，不碰 DOM 结构
+        var sameShape = rowsDom && flowListKeys.length === wantKeys.length;
+        if (sameShape) {
+            for (var si = 0; si < wantKeys.length; si++) {
+                if (flowListKeys[si] !== wantKeys[si]) { sameShape = false; break; }
+            }
         }
-        listDom.innerHTML = html;
+        if (sameShape) {
+            if (flowListCount !== list.length) {
+                flowListCount = list.length;
+                var cnt0 = listDom.querySelector('.flow-list-count');
+                if (cnt0) cnt0.innerHTML = flowListCountHtml(list.length);
+            }
+            return;
+        }
+
+        // ② 只在「头部前置了若干新行」时做局部插入，保持既有行不重排
+        if (rowsDom && flowListKeys.length) {
+            var known = {};
+            for (var ki = 0; ki < flowListKeys.length; ki++) known[flowListKeys[ki]] = true;
+            var addedCount = 0;
+            while (addedCount < wantKeys.length && !known[wantKeys[addedCount]]) addedCount++;
+            var prefixOnly = addedCount > 0 && wantKeys.length === flowListKeys.length + addedCount;
+            if (prefixOnly) {
+                for (var ci = 0; ci < flowListKeys.length; ci++) {
+                    if (flowListKeys[ci] !== wantKeys[addedCount + ci]) { prefixOnly = false; break; }
+                }
+            }
+            if (prefixOnly) {
+                var fragment = '';
+                for (var ai = 0; ai < addedCount; ai++) fragment += rows[ai].html;
+                rowsDom.insertAdjacentHTML('afterbegin', fragment);
+                while (rowsDom.children.length > MAX_FLOW_LIST_ROWS) {
+                    rowsDom.removeChild(rowsDom.lastElementChild);
+                }
+                flowListKeys = wantKeys;
+                flowListCount = list.length;
+                var cnt1 = listDom.querySelector('.flow-list-count');
+                if (cnt1) cnt1.innerHTML = flowListCountHtml(list.length);
+                return;
+            }
+        }
+
+        // ③ 兜底：结构变化（清空、跳变、过期裁剪）时整体重建
+        var body = '';
+        for (var bi = 0; bi < rows.length; bi++) body += rows[bi].html;
+        listDom.innerHTML = flowListHeadHtml(list.length) + FLOW_COL_HEAD + '<div class="flow-rows">' + body + '</div>';
+        flowListKeys = wantKeys;
+        flowListCount = list.length;
     }
 
     function escapeHtml(s) {
@@ -715,31 +976,60 @@
             .replace(/'/g, '&#39;');
     }
 
+    function pad2(n) { return (n < 10 ? '0' : '') + n; }
+    function pad3(n) { return (n < 100 ? '0' : '') + (n < 10 ? '0' : '') + n; }
+
     /* --------------------------- 对外主入口 --------------------------- */
     function renderLiveFlowGraph_impl(flows) {
         if (!ensureCanvas()) return;
-        ingest(flows);
+        var added = ingest(flows);
         var list = Array.isArray(flows) ? flows : [];
+        // 把这一轮的原始 flows 广播出去：桑基图视图（live_views_impl.js）要用它算流量占比，
+        // 让它自己去轮询 /api/live/stats 会变成两条独立的取数链路，容易不同步。
+        try {
+            window.dispatchEvent(new CustomEvent('dlids:live-flows', { detail: list }));
+        } catch (e) { /* 老浏览器没有 CustomEvent 时静默跳过 */ }
         if (!list.length) {
             // 显式传入空数组＝清空视图（但保留 TTL 语义外的既有数据）
             trackedFlows = [];
             renderFlowList([]);
         }
-        // 数据可能已过期，标记一次让下一帧重建快照
-        layoutDirty = true;
+        // 没有新流时 ingest 不会做过期清理，这里补一次，让超时节点能自然消失
+        var nodesBefore = Object.keys(nodeStore).length;
+        var edgesBefore = Object.keys(edgeStore).length;
+        pruneStores(Date.now());
+        var pruned = nodesBefore !== Object.keys(nodeStore).length
+            || edgesBefore !== Object.keys(edgeStore).length;
+
+        // 只有「出现新流 / 旧流过期 / 画布尺寸变化」才重建布局快照。
+        // 过去这里无条件 layoutDirty = true，配合每 1.5s 的轮询＝节点与边快照每轮重建一次，
+        // 观感上就是辐射图定时闪烁（节点呼吸相位、脉冲相位被反复重置）。
+        if (added || pruned) layoutDirty = true;
     }
 
-    function restoreFromRecords(records) {
-        if (!Array.isArray(records)) return;
-        var flows = [];
+    /* 记录存储里每条形如 { name, size, time, data, options }，真正的流数据挂在 data.flows 上；
+       这里同时兼容「记录数组」「已展开的流数组」「单个流对象」三种形态，任何一处能取到流即可。
+       之前只读 r.flows / r.src，取不到 data.flows，导致刷新后辐射图重建不出来。 */
+    function extractFlows(records) {
+        var out = [];
+        if (!Array.isArray(records)) return out;
         for (var i = 0; i < records.length; i++) {
             var r = records[i];
             if (!r) continue;
-            if (Array.isArray(r.flows)) flows = flows.concat(r.flows);
-            else if (r.src || r.src_ip) flows.push(r);
+            var d = (r.data && typeof r.data === 'object') ? r.data : null;
+            if (d && Array.isArray(d.flows)) out = out.concat(d.flows);
+            else if (Array.isArray(r.flows)) out = out.concat(r.flows);
+            else if (d && (d.src || d.src_ip || d.src_addr)) out.push(d);
+            else if (r.src || r.src_ip || r.src_addr) out.push(r);
         }
-        if (!flows.length) return;
+        return out;
+    }
+
+    function restoreFromRecords(records) {
+        var flows = extractFlows(records);
+        if (!flows.length) return 0;
         renderLiveFlowGraph_impl(flows);
+        return flows.length;
     }
 
     function clearLiveLogs() {
@@ -752,6 +1042,9 @@
         for (k in nodeStore) if (Object.prototype.hasOwnProperty.call(nodeStore, k)) delete nodeStore[k];
         for (k in edgeStore) if (Object.prototype.hasOwnProperty.call(edgeStore, k)) delete edgeStore[k];
         for (k in animNodes) if (Object.prototype.hasOwnProperty.call(animNodes, k)) delete animNodes[k];
+        // 去重表一起复位：清空是「从头开始」的语义，之后同样的流再到达要能重新计数。
+        ingestedKeys.clear();
+        ingestedKeyOrder.length = 0;
         layout = null;
         layoutDirty = true;
 

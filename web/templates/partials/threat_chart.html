@@ -1,14 +1,24 @@
-<!-- Threat Type Distribution
-     全站固定高度 360px：口径由 window.dlidsRenderStats 统一维护，卡片本身在任何页面
-     长相与高度完全一致，切换页面不会变形。 -->
-<div class="panel flex flex-col h-[360px]">
+<!-- 威胁类型分布
+     这里画的是**六分类**（Benign / Bot / DDoS-HOIC / DoS-GoldenEye / DoS-Slowloris /
+     DDoS-LOIC-UDP，外加 OOD 单列的「未知攻击」），所以用横向条形不用饼图：
+     六类的数量常常跨两个数量级（Benign 几十万、LOIC-UDP 几百），饼图在长尾分布下
+     会挤成一条线，条形既能读出绝对数量也能读出相对占比。
+
+     数据来源：/analyze-flow（CSV → 78 维流特征）与 /analyze（pcap → 78 维流特征）
+     都返回同一结构的 threat_summary，两条链路喂同一套渲染，卡片在三页（概览 /
+     实时抓包 / 上传检测）长得一样、口径也一致。
+
+     样式全部走 styles.css 的 .threat-* 专用类，不用 Tailwind：
+     vendor/tailwind.css 是预编译产物，h-1.5 / space-y-2.5 这类都不在里面。 -->
+<div class="panel flex flex-col threat-panel">
     <div class="panel-head">
         <h2 class="panel-title">
-            <i class="fa-solid fa-chart-pie text-cyber-primary mr-2"></i>威胁类型分布
+            <i class="fa-solid fa-chart-simple text-cyber-primary mr-2"></i>威胁类型分布
         </h2>
         <span class="panel-hint" id="threatChartHint">本次运行累计</span>
     </div>
-    <div class="p-4 flex-1 min-h-[240px]">
-        <div id="pieChart" class="w-full h-full"></div>
+    <div class="p-4 flex-1 threat-chart-body">
+        <div id="threatBars" class="threat-bars"></div>
+        <p id="threatEmpty" class="threat-empty">暂无数据</p>
     </div>
 </div>

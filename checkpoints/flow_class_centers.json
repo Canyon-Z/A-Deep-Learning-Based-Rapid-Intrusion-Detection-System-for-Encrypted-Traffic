@@ -1,0 +1,30 @@
+{
+  "class_names": [
+    "Benign",
+    "Bot",
+    "DDoS-HOIC",
+    "DoS-GoldenEye",
+    "DoS-Slowloris",
+    "DDoS-LOIC-UDP"
+  ],
+  "class_counts": {
+    "Benign": 304761,
+    "Bot": 242500,
+    "DDoS-HOIC": 296042,
+    "DoS-GoldenEye": 41508,
+    "DoS-Slowloris": 10990,
+    "DDoS-LOIC-UDP": 1730
+  },
+  "distance": {
+    "mean": 1.403746485710144,
+    "median": 0.0501897856593132,
+    "max": 956.9662475585938,
+    "percentiles": {
+      "50": 0.0501897856593132,
+      "90": 3.8069257736206055,
+      "99": 13.919200897216797,
+      "99.9": 37.77265167236328,
+      "99.99": 78.52351379394531
+    }
+  }
+}

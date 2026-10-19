@@ -1,0 +1,79 @@
+<!-- 跨域能力评估
+     这张面板的唯一目的：把「同源 99.9%」和「换个环境就失效」摆在同一屏上，
+     避免只看模型评估页上方那排数字就误判系统能力边界。
+
+     数据全部来自 logs/ 下实际跑过的实验（/api/cross-domain 读取并原样返回），
+     页面不做任何换算——数字对不上时应该去改实验，而不是在这里调显示。
+
+     表格样式走 styles.css 的 .xd-* 专用类而不是 Tailwind：
+     vendor/tailwind.css 是构建期预编译产物，px-2 / text-[11px] 这类任意值类
+     不一定在里面，写了会静默失效（威胁类型分布卡踩过同一个坑）。 -->
+<section id="cross-domain-section" class="panel">
+    <div class="panel-head">
+        <h2 class="panel-title">
+            <i class="fa-solid fa-arrows-left-right-to-line text-cyber-primary mr-2"></i>跨域能力评估
+        </h2>
+        <span class="panel-hint">同一批权重 · 换一批数据就换一套结论</span>
+    </div>
+    <div class="p-4">
+        <p class="xd-note" id="xdSummary">加载中…</p>
+        <!-- 缺陷 M4：这一页原本只陈列数字，不说哪些数字不可引用。
+             image_ics 上 MLP 的 accuracy 是 0.10%、FPR 99.91%（比随机还差），
+             页面却和 99.9% 并排展示，读者会当成「模型选择」而不是「数据不成立」。
+             后端 /api/cross-domain 对每条日志算 caveats（severity / metrics_reliable /
+             notes），这里原样渲染，不改写、不换算。 -->
+        <div id="xdCaveats" class="xd-caveats" hidden></div>
+
+        <h3 class="xd-h3">图像分支（28×28 会话字节图）· 权重训练于 USTC-TFC2016</h3>
+        <div class="xd-scroll">
+            <table class="xd-table">
+                <thead>
+                    <tr>
+                        <th>模型</th>
+                        <th>USTC 同源测试集<br><span class="xd-sub">准确率 / 检出 / 误报</span></th>
+                        <th>ICS 跨域<br><span class="xd-sub">准确率 / 检出 / 误报</span></th>
+                        <th>CSE-CIC-IDS2018 跨域<br><span class="xd-sub">准确率 / F1 / AUC</span></th>
+                    </tr>
+                </thead>
+                <tbody id="xdImageBody">
+                    <tr><td colspan="4" class="xd-empty">暂无数据</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h3 class="xd-h3">流特征分支（78 维 CICFlowMeter）· 同一天内 vs 换一天</h3>
+        <div class="xd-scroll">
+            <table class="xd-table">
+                <thead>
+                    <tr><th>组</th><th>设置</th><th>准确率</th><th>检出率</th><th>误报率</th><th>AUC</th></tr>
+                </thead>
+                <tbody id="xdFlowBody">
+                    <tr><td colspan="6" class="xd-empty">暂无数据</td></tr>
+                </tbody>
+            </table>
+            <p class="xd-footnote">
+                三项比率均为百分比（%）。误报率按「正常流被报成攻击」计算，
+                原始日志里 A/B/C 三组打印的是比例（如 0.00342857），已统一换算为 0.3429%。
+            </p>
+        </div>
+
+        <h3 class="xd-h3">适配手段 · 目标域只用无标签数据或少量标注</h3>
+        <div class="xd-scroll">
+            <table class="xd-table">
+                <thead>
+                    <tr><th>手段</th><th>标签成本</th><th>准确率</th><th>检出率</th><th>误报率</th><th>结论</th></tr>
+                </thead>
+                <tbody id="xdAdaptBody">
+                    <tr><td colspan="6" class="xd-empty">暂无数据</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p class="xd-foot">
+            结论：模型学到的是「这个采集环境下的流量形状」，不是「攻击本身」。
+            同源数据集上 99.9% 成立，换采集环境后掉到随机水平。
+            目前唯一被验证有效的办法是给目标环境补少量标注做微调
+            （1000 条把检出从 0% 拉到 97.21%），代价是环境一变就要重做。
+        </p>
+    </div>
+</section>

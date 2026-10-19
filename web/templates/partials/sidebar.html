@@ -1,7 +1,7 @@
 <!-- 左侧导航：5 个页面之间唯一的导航方式，页面刷新即整页渲染，不做任何 DOM 搬移 -->
 <aside class="app-sidebar">
     <!-- 收起 / 展开的开关就是品牌图标本身：收起时它是侧栏里唯一还认得出的标志，
-         展开时它在标题左边 —— 位置始终不变，不用再单独放一个悬在边线上的圆钮。 -->
+         展开时它在标题左边，位置始终不变，不用再单独放一个悬在边线上的圆钮。 -->
     <div class="app-brand">
         <button id="sidebarToggle" class="app-brand-icon" type="button" aria-controls="appNav"
                 aria-expanded="true" aria-label="收起或展开侧边导航" title="收起侧栏">
@@ -21,19 +21,27 @@
             <i class="fa-solid fa-gauge-high"></i><span>总览</span>
         </a>
 
-        <a href="/upload" class="app-nav-item{% if active_page == 'upload' %} is-active{% endif %}"
-           {% if active_page == 'upload' %}aria-current="page"{% endif %}>
-            <i class="fa-solid fa-file-arrow-up"></i><span>上传检测</span>
+        <!-- 上传检测与实时抓包是同一套检测能力的两种输入方式，2026-11-01 起合并为一个入口：
+             页面内用顶部 tab 切换，侧栏不再各占一项。active_page 可能是 detect/upload/live
+             （旧链接仍能进来），三种都要高亮同一项。 -->
+        <a href="/detect" class="app-nav-item{% if active_page in ['detect', 'upload', 'live'] %} is-active{% endif %}"
+           {% if active_page in ['detect', 'upload', 'live'] %}aria-current="page"{% endif %}>
+            <i class="fa-solid fa-satellite-dish"></i><span>检测工作台</span>
         </a>
 
-        <a href="/live" class="app-nav-item{% if active_page == 'live' %} is-active{% endif %}"
-           {% if active_page == 'live' %}aria-current="page"{% endif %}>
-            <i class="fa-solid fa-tower-broadcast"></i><span>实时抓包</span>
+        <a href="/flow" class="app-nav-item{% if active_page == 'flow' %} is-active{% endif %}"
+           {% if active_page == 'flow' %}aria-current="page"{% endif %}>
+            <i class="fa-solid fa-tags"></i><span>流量分类</span>
         </a>
 
         <a href="/records" class="app-nav-item{% if active_page == 'records' %} is-active{% endif %}"
            {% if active_page == 'records' %}aria-current="page"{% endif %}>
             <i class="fa-solid fa-list-ul"></i><span>检测记录</span>
+        </a>
+
+        <a href="/review" class="app-nav-item{% if active_page == 'review' %} is-active{% endif %}"
+           {% if active_page == 'review' %}aria-current="page"{% endif %}>
+            <i class="fa-solid fa-clipboard-check"></i><span>复核中心</span>
         </a>
 
         <a href="/models" class="app-nav-item{% if active_page == 'models' %} is-active{% endif %}"

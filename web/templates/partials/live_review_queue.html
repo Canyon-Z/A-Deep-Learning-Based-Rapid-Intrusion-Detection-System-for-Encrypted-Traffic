@@ -1,0 +1,25 @@
+<!-- 待复核队列
+     入队判据由后端 `_sync_review_queue` 决定：六分类判成 review/manual 档，或离所有类中心
+     都超过 p99.9 被标为「未知攻击」。不按二元模型的置信度筛 —— 字节图上实测 8 份工控
+     pcap 的批次置信度全在 0.95 以上，那个判据基本不触发。 -->
+<div class="panel flex flex-col">
+    <div class="panel-head">
+        <h2 class="panel-title">
+            <i class="fa-solid fa-clipboard-check text-cyber-primary mr-2"></i>待复核队列
+        </h2>
+        <span class="panel-hint" id="liveReviewHint">0 条</span>
+    </div>
+    <div class="px-3 pb-2 flex items-center gap-2">
+        <button type="button" id="liveExportCalib" class="btn btn-ghost btn-xs"
+                title="把当前抓到的本机流量导出成校准 CSV（本机流量标 Benign + 六类锚点样本）">
+            <i class="fa-solid fa-download mr-1"></i>导出校准数据
+        </button>
+        <span class="text-[11px] text-gray-500">抓 30~60 秒后导出</span>
+    </div>
+    <!-- max-h 与 overflow 必须写在 styles.css 的 .review-queue-list 里：
+         Tailwind 是本地预编译产物，任意值类只有构建时扫到的那些，
+         max-h-[320px] 不在产物里，写上等于没写（列表会被几十条记录拉到半屏）。 -->
+    <div class="p-2 flex-1 review-queue-list" id="liveReviewList">
+        <div class="text-xs text-gray-500 text-center py-8">暂无待复核流量</div>
+    </div>
+</div>

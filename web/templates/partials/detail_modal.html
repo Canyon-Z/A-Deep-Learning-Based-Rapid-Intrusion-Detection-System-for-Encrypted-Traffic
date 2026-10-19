@@ -51,6 +51,16 @@
                                      style="background: var(--ds-accent);"></div>
                             </div>
                         </div>
+
+                        <!-- 加权取证：以前「这次到底有没有用域加权」只存在于 API 响应里，
+                             用户只能靠「恶意占比没变」去猜，等于没有。这里把它摊开。 -->
+                        <div id="modalEvidence" class="hidden pt-2 border-t border-cyber-border">
+                            <div class="flex justify-between text-sm mb-1.5">
+                                <span class="text-gray-400">投票加权</span>
+                                <span class="font-mono text-[11px] text-cyber-primary" id="modalEvidenceMode">-</span>
+                            </div>
+                            <div id="modalEvidenceBody" class="font-mono text-[11px] leading-relaxed text-gray-400 space-y-0.5"></div>
+                        </div>
                     </div>
                 </div>
             </div>

@@ -2,6 +2,15 @@
 (function(){
     window.uploadTrendImpl = window.uploadTrendImpl || {};
 
+    // 折线两色只在这里定义一次，取值与 styles.css 的 --ds-chart-normal / --ds-chart-malware
+    // 必须一致：图例是 HTML 画的、线是 canvas 画的，两处各写一份颜色就会对不上
+    // （过去图例是青色方块、线是绿色）。ECharts 不认 CSS 变量，只能写字面值，
+    // 所以这里保留一份镜像常量，改颜色时两个文件一起改。
+    const CHART_NORMAL = '#10B981';
+    const CHART_MALWARE = '#F43F5E';
+    const AREA_NORMAL = ['rgba(16, 185, 129, 0.3)', 'rgba(16, 185, 129, 0)'];
+    const AREA_MALWARE = ['rgba(244, 63, 94, 0.3)', 'rgba(244, 63, 94, 0)'];
+
     function toSafeNumber(value, fallback) {
         const num = Number(value);
         return Number.isFinite(num) ? num : fallback;
@@ -32,13 +41,15 @@
             malware: [],
             totalScans: 0,
             malwareCount: 0,
+            // true 表示当前曲线是「上传 + 实时」合并数据（总览页），不写 dlidsStats.upload
+            suppressStats: false,
         };
         return window.uploadTrendImpl.state;
     }
 
-    // 注意：页面上有 <div id="pieChart"> 与 <div id="lineChart">，浏览器会把 window.pieChart /
-    // window.lineChart 自动解析成 DOM 元素（HTML 命名元素访问）。所以取实例前必须验证「它是不是
-    // ECharts 实例」，否则 DOM 会被当成图表用：init 被跳过、setOption 不存在 → 整块卡片空白。
+    // 注意：页面上有 <div id="lineChart">，浏览器会把 window.lineChart 自动解析成 DOM 元素
+    // （HTML 命名元素访问）。所以取实例前必须验证「它是不是 ECharts 实例」，否则 DOM 会被当成
+    // 图表用：init 被跳过、setOption 不存在 → 整块卡片空白。
     function isChartInstance(c) {
         return !!c && typeof c.setOption === 'function' && typeof c.getOption === 'function';
     }
@@ -58,12 +69,6 @@
         return instanceFromDom('lineChart');
     }
 
-    function getPieChart() {
-        if (isChartInstance(window.uploadPieChart)) return window.uploadPieChart;
-        if (isChartInstance(window.pieChart)) return window.pieChart;
-        return instanceFromDom('pieChart');
-    }
-
     function syncGlobals(state) {
         window.trendLabels = state.labels;
         window.benignTrend = state.benign;
@@ -76,33 +81,41 @@
         const state = getState();
         // upload_trend_impl 是本项目里唯一被加载、被调用的上传统计维护者（charts_impl.js 没有进 main.js
         // 的模块清单），所以上传这一路的口径在这里写入统一统计层。
-        if (window.dlidsStats) {
+        // 但总览页画的是「上传 + 实时」合并曲线（见 restoreFromRecords 的 mergeStats 选项），
+        // 那份合并条数不能写进 upload 计数：dlidsStatsSnapshot 已经把 upload.total 与
+        // live.sessions 相加，再混入实时条数会重复计算，KPI 直接翻倍。
+        if (window.dlidsStats && !state.suppressStats) {
             window.dlidsStats.upload = {
-                total: Math.max(0, toSafeNumber(state.totalScans, 0)),
-                malware: Math.max(0, toSafeNumber(state.malwareCount, 0))
+                total: Math.max(0, toSafeNumber(state.statsTotal, toSafeNumber(state.totalScans, 0))),
+                malware: Math.max(0, toSafeNumber(state.statsMalware, toSafeNumber(state.malwareCount, 0)))
+            };
+        } else if (window.dlidsStats && state.suppressStats) {
+            // 合并模式：曲线是两路之和，但 KPI 只认真实上传条数（实时那一路由
+            // dlidsStats.live.sessions 提供，混进来会重复计数）。
+            window.dlidsStats.upload = {
+                total: Math.max(0, toSafeNumber(state.statsTotal, 0)),
+                malware: Math.max(0, toSafeNumber(state.statsMalware, 0))
             };
         }
         syncGlobals(state);
         const lineChart = getLineChart();
         if (lineChart) {
             lineChart.setOption({
-                // 没有数据时给个明确空态，免得只看到一片空的坐标区（饼图那边是「暂无数据」）
+                // 没有数据时给个明确空态，免得只看到一片空的坐标区
                 title: { show: state.labels.length === 0, text: '暂无数据', left: 'center', top: 'middle', textStyle: { color: '#64748B', fontSize: 12, fontWeight: 'normal' } },
                 xAxis: { data: state.labels },
                 series: [{ data: state.benign }, { data: state.malware }]
             });
         }
-        // KPI 与威胁分布饼图统一由 dlidsRenderStats 输出，保证与实时页同一口径、切页面不变
+        // KPI 与威胁类型分布统一由 dlidsRenderStats 输出，保证与实时页同一口径、切页面不变
         if (window.dlidsRenderStats) window.dlidsRenderStats();
     }
 
     window.uploadTrendImpl.initCharts = function() {
         try {
-            // 拆成 5 个页面后，趋势图和威胁分布饼图不再总是同时存在（例如「实时抓包」页只有饼图）。
-            // 这里必须逐个判断容器是否存在：echarts.init(null) 会抛错，一旦抛在折线图那一步，
-            // 后面的饼图初始化就被跳过 —— 表现就是实时页的威胁分布永远空白。
+            // 五个页面里趋势图不总是存在（「实时抓包」页只有威胁分布卡片）。
+            // echarts.init(null) 会抛错，所以必须先判断容器在不在。
             const lineEl = document.getElementById('lineChart');
-            const pieEl = document.getElementById('pieChart');
 
             if (!getLineChart() && lineEl && typeof echarts !== 'undefined') {
                 window.uploadTrendChart = echarts.init(lineEl, window.DLIDS_CHART_THEME || null);
@@ -118,27 +131,15 @@
                     xAxis: { type: 'category', boundaryGap: false, data: [], axisLine: { lineStyle: { color: '#222C3A' } }, axisLabel: { color: '#64748B' } },
                     yAxis: { type: 'value', splitLine: { lineStyle: { color: '#222C3A', type: 'dashed' } }, axisLabel: { color: '#64748B' } },
                     series: [
-                        { name: '正常流量', type: 'line', smooth: true, itemStyle: { color: '#10B981' }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(16, 185, 129, 0.3)' },{ offset: 1, color: 'rgba(16, 185, 129, 0)' }]) }, data: [] },
-                        { name: '恶意流量', type: 'line', smooth: true, itemStyle: { color: '#F43F5E' }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(244, 63, 94, 0.3)' },{ offset: 1, color: 'rgba(244, 63, 94, 0)' }]) }, data: [] }
+                        { name: '正常流量', type: 'line', smooth: true, itemStyle: { color: CHART_NORMAL }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: AREA_NORMAL[0] },{ offset: 1, color: AREA_NORMAL[1] }]) }, data: [] },
+                        { name: '恶意流量', type: 'line', smooth: true, itemStyle: { color: CHART_MALWARE }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: AREA_MALWARE[0] },{ offset: 1, color: AREA_MALWARE[1] }]) }, data: [] }
                     ]
                 }, true);
             }
 
-            if (!getPieChart() && pieEl && typeof echarts !== 'undefined') {
-                window.uploadPieChart = echarts.init(pieEl, window.DLIDS_CHART_THEME || null);
-                window.pieChart = window.uploadPieChart;
-            }
-            // 无论实例是谁 init 的，这里都先给它一次完整的 pie 定义（含 type:'pie'）：
-            // dlidsRenderStats 之后用 merge 只更新数据，若初始 series 缺失，merge 会建出默认的 line series。
-            if (getPieChart()) {
-                getPieChart().setOption({
-                    backgroundColor: 'transparent',
-                    tooltip: { trigger: 'item' },
-                    title: { show: true, text: '暂无数据', left: 'center', top: 'middle', textStyle: { color: '#64748B', fontSize: 12, fontWeight: 'normal' } },
-                    legend: { show: false, bottom: '0%', textStyle: { color: '#94A3B8' }, icon: 'circle' },
-                    series: [{ name: '威胁类型', type: 'pie', radius: ['40%', '70%'], avoidLabelOverlap: false, stillShowZeroSum: false, emptyCircleStyle: { color: 'transparent', borderColor: 'transparent' }, itemStyle: { borderRadius: 10, borderColor: '#151C28', borderWidth: 2 }, label: { show: false }, emphasis: { label: { show: true, fontSize: '18', fontWeight: 'bold', color: '#fff' } }, labelLine: { show: false }, data: [] }]
-                }, true);
-            }
+            // 威胁类型分布改成六分类横向条形后不再走 ECharts（DOM 渲染，见 main.js 的
+            // dlidsRenderThreatBars）：它要按「六类固定行位置」展示，饼图做不到这一点，
+            // 也不需要 canvas 实例。所以这里只剩折线图需要 init。
             renderCharts();
         } catch (e) { console.warn('uploadTrendImpl.initCharts failed', e); }
     };
@@ -147,7 +148,6 @@
         try {
             renderCharts();
             try { const lineChart = getLineChart(); if (lineChart && typeof lineChart.resize === 'function') lineChart.resize(); } catch (e) {}
-            try { const pieChart = getPieChart(); if (pieChart && typeof pieChart.resize === 'function') pieChart.resize(); } catch (e) {}
         } catch (e) { console.warn('uploadTrendImpl.activate failed', e); }
     };
 
@@ -159,11 +159,15 @@
             state.malware = [];
             state.totalScans = 0;
             state.malwareCount = 0;
+            // 清空后回到「只统计上传」的正常模式，否则清日志后 KPI 第 1 格再也不更新
+            state.suppressStats = false;
             renderCharts();
         } catch (e) { console.warn('uploadTrendImpl.resetTrendChart failed', e); }
     };
 
-    window.uploadTrendImpl.restoreFromRecords = function(records) {
+    // options.mergeStats=true 表示传进来的是「上传 + 实时」合并记录（总览页用）：
+    // 折线照画，但不把合并条数写回 dlidsStats.upload（理由见 renderCharts）。
+    window.uploadTrendImpl.restoreFromRecords = function(records, options) {
         try {
             const list = Array.isArray(records) ? records : [];
             const uploadRecords = list.filter((item) => item && typeof item === 'object');
@@ -180,6 +184,15 @@
             });
 
             const state = getState();
+            state.suppressStats = !!(options && options.mergeStats);
+            // 合并模式下另外传一份「真实上传记录」用来算 KPI 计数，不传就退回当前这批
+            const statsList = (options && Array.isArray(options.statsRecords)) ? options.statsRecords : uploadRecords;
+            state.statsTotal = statsList.filter((item) => item && typeof item === 'object').length;
+            state.statsMalware = statsList.filter((item) => {
+                const data = item && item.data && typeof item.data === 'object' ? item.data : {};
+                const status = String(data.status || '').toLowerCase();
+                return !!(data.is_malicious || status.includes('malicious') || status.includes('malware'));
+            }).length;
             state.labels = [];
             state.benign = [];
             state.malware = [];
@@ -222,6 +235,25 @@
             if (isMal) state.malwareCount = toSafeNumber(state.malwareCount, 0) + 1;
             renderCharts();
             window.uploadTrendImpl.updateTrendChart(isMal);
+            // 威胁类型分布走六分类口径。/analyze 现在也返回 threat_summary
+            // （pcap → 78 维流特征 → flow_multiclass），结构与 /analyze-flow 的
+            // class_summary 一致，所以两条链路共用同一个吸收函数。
+            // 模型未加载、或这份 pcap 一条流都没解析出来时该字段是 null：直接跳过，
+            // 让卡片保留上一次的累计值，而不是把已有数据清空。
+            if (data && data.threat_summary && typeof window.dlidsAbsorbThreatSummary === 'function') {
+                window.dlidsAbsorbThreatSummary(data.threat_summary);
+            }
+            // 逐流明细：卡片上点开某个分类看的就是这批流，也是卡片计数的唯一来源。
+            // 按双向五元组合并去重（不是按事件追加），和记录表同一口径；
+            // 上限 1500 条是防内存——单次上传最多回 200 条（后端 THREAT_FLOW_ROWS_LIMIT）。
+            // 必须在 threat_summary 判断之外执行：summary 缺失但明细还在时也要能显示。
+            const rows = Array.isArray(data && data.threat_flows) ? data.threat_flows : [];
+            if (rows.length && typeof window.dlidsMergeThreatFlows === 'function') {
+                window.dlidsMergeThreatFlows(rows, { key: 'upload', max: 1500 });
+            }
+            if (data && data.threat_meta && typeof window.dlidsSetThreatMeta === 'function') {
+                window.dlidsSetThreatMeta(data.threat_meta, { key: 'upload' });
+            }
         } catch (e) { console.warn('uploadTrendImpl.updateStats failed', e); }
     };
 

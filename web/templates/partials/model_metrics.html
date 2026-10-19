@@ -1,23 +1,11 @@
 {% set models = [
-    {'key': 'cnn_bilstm',      'prefix': 'm1', 'display': 'CNN-BiLSTM',            'arch': 'CNN + BiLSTM',      'acc': '87.90%'},
-    {'key': 'classic_cnn',     'prefix': 'm2', 'display': 'Classic-CNN',           'arch': 'CNN only',          'acc': '87.92%'},
-    {'key': 'lightweight_cnn', 'prefix': 'm3', 'display': 'Lightweight CNN-BiLSTM','arch': 'Pruned + BiLSTM',   'acc': '87.90%'},
-    {'key': 'pure_bilstm',     'prefix': 'm4', 'display': 'Pure BiLSTM',           'arch': 'BiLSTM only',       'acc': '87.77%'},
-    {'key': 'mlp',             'prefix': 'm5', 'display': 'MLP',                   'arch': 'Fully connected',   'acc': '99.97%'},
-    {'key': 'transformer',     'prefix': 'm6', 'display': 'Transformer',           'arch': 'Self-attention',    'acc': '87.70%'}
+    {'key': 'cnn_bilstm',      'prefix': 'm1', 'display': 'CNN-BiLSTM',            'arch': 'CNN + BiLSTM'},
+    {'key': 'classic_cnn',     'prefix': 'm2', 'display': 'Classic-CNN',           'arch': 'CNN only'},
+    {'key': 'lightweight_cnn', 'prefix': 'm3', 'display': 'Lightweight CNN-BiLSTM','arch': 'Pruned + BiLSTM'},
+    {'key': 'pure_bilstm',     'prefix': 'm4', 'display': 'Pure BiLSTM',           'arch': 'BiLSTM only'},
+    {'key': 'mlp',             'prefix': 'm5', 'display': 'MLP',                   'arch': 'Fully connected'},
+    {'key': 'transformer',     'prefix': 'm6', 'display': 'Transformer',           'arch': 'Self-attention'}
 ] %}
-
-{% macro model_chip(m) %}
-<button type="button" id="modelCard-{{ m.key }}" class="model-chip"
-        onclick="selectModel('{{ m.key }}', '{{ m.display }}')">
-    <span class="mc-name">{{ m.display }}</span>
-    <span class="mc-acc font-mono" id="{{ m.prefix }}-acc">{{ m.acc }}</span>
-    <span class="mc-meta">
-        <span>{{ m.arch }}</span>
-        <span id="tag-{{ m.key }}" class="mc-state">待命</span>
-    </span>
-</button>
-{% endmacro %}
 
 {% macro model_detail(m) %}
 <div class="model-detail hidden" data-model-detail="{{ m.key }}">
@@ -38,39 +26,68 @@
         <div class="metric-cell"><div class="mlabel">检出率 DR</div><div class="mvalue font-mono" id="{{ m.prefix }}-dr">--</div></div>
     </div>
 
-    <div class="value-grid mb-4">
+    <div class="value-grid">
         <div class="value-item"><div class="vlabel">误报率 FPR</div><div class="vvalue font-mono" id="{{ m.prefix }}-fpr">--</div></div>
         <div class="value-item"><div class="vlabel">漏报率 FNR</div><div class="vvalue font-mono" id="{{ m.prefix }}-fnr">--</div></div>
         <div class="value-item"><div class="vlabel">单条延迟</div><div class="vvalue font-mono" id="{{ m.prefix }}-lat">--</div></div>
         <div class="value-item"><div class="vlabel">吞吐</div><div class="vvalue font-mono" id="{{ m.prefix }}-tps">--</div></div>
         <div class="value-item"><div class="vlabel">AUC</div><div class="vvalue font-mono" id="{{ m.prefix }}-auc">--</div></div>
     </div>
-
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <div class="chart-box">
-            <div class="chart-title">核心指标</div>
-            <div id="chart-metrics-{{ m.prefix }}" class="h-56 w-full"></div>
-        </div>
-        <div class="chart-box">
-            <div class="chart-title">AUC 横向对比</div>
-            <div id="chart-compare-{{ m.prefix }}" class="h-56 w-full"></div>
-        </div>
-    </div>
 </div>
 {% endmacro %}
 
-<section id="model-metrics-section" class="col-span-12 mt-4 border-t border-cyber-border pt-8">
-    <div class="flex items-end justify-between flex-wrap gap-3 mb-4">
-        <div>
-            <h2 class="text-base font-semibold text-gray-100">多维度模型效能评估中心</h2>
-            <p class="text-xs text-gray-500 mt-1 font-mono">Model Performance &amp; Security Metrics Matrix</p>
-        </div>
-        <span class="panel-hint">数据源 /api/metrics（checkpoints/model_metrics.json）</span>
-    </div>
+<!-- 模型对比：六个模型是「同构对象 × 多属性」，只有一张表能放进同一个视野比较。
+     原先的 6 张卡片各自只能重复同一个指标，而那个指标恰好是六者最接近的一项，
+     于是六张卡看起来一模一样；真正区分它们的延迟 / 吞吐 / 误报率被压进各自详情，
+     读者要先点六次才能比完。
 
+     列的选择是按「有没有区分度」定的，不是按「指标重不重要」：
+     - 准确率 ACC 六个模型都是 99.97%（同一个测试集、同一个判定阈值），
+       放在对比列里只是一列重复数字，而它在详情里仍然保留，一个都没丢。
+       这个数据集恶意样本占比极低，ACC 本身也是最能骗人的指标。
+     - 检出率 DR、误报率 FPR 是安全场景真正要看的两个数，替换掉 ACC 的位置。
+     - 延迟、吞吐六者相差两倍（0.0118~0.0236 ms / 42k~85k 条每秒），是最有区分度的两列。
+     每列最优值标绿（.cmp-best）：AUC / DR / 吞吐 取最大，FPR / 延迟 取最小；
+     一列所有模型数值相同时不标（并列第一不是结论，只是这列没有区分度）。 -->
+<section id="model-metrics-section">
     <div class="panel">
-        <div class="model-strip">
-            {% for m in models %}{{ model_chip(m) }}{% endfor %}
+        <div class="panel-head">
+            <h2 class="panel-title">
+                <i class="fa-solid fa-table-columns text-cyber-primary mr-2"></i>模型效能对比
+            </h2>
+            <span class="panel-hint">点任一行查看完整指标 · 绿色为该列最优</span>
+        </div>
+
+        <div class="px-2">
+            <table class="cmp-table">
+                <thead>
+                    <tr>
+                        <th>模型</th>
+                        <th>检出率 DR</th>
+                        <th>误报率 FPR</th>
+                        <th>单条延迟</th>
+                        <th>吞吐 条/s</th>
+                        <th>AUC</th>
+                        <th>状态</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in models %}
+                    <tr id="modelCard-{{ m.key }}" class="cmp-row" data-model-key="{{ m.key }}"
+                        onclick="selectModel('{{ m.key }}', '{{ m.display }}')">
+                        <td>
+                            <span class="cmp-name">{{ m.display }}<span class="cmp-arch">{{ m.arch }}</span></span>
+                        </td>
+                        <td id="{{ m.prefix }}-t-dr">--</td>
+                        <td id="{{ m.prefix }}-t-fpr">--</td>
+                        <td id="{{ m.prefix }}-t-lat">--</td>
+                        <td id="{{ m.prefix }}-t-tps">--</td>
+                        <td id="{{ m.prefix }}-t-auc">--</td>
+                        <td><span id="tag-{{ m.key }}" class="mc-state">待命</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
 
         <div class="border-t border-cyber-border p-4">

@@ -1,0 +1,72 @@
+<!-- 分类明细表。行序由后端给定：按置信度升序，最可疑的在最前，可以直接当复核队列用。
+     筛选按钮只做前端过滤，不重新请求。
+     「AI 分析」只在人工复核/待确认的行上出现：它是给复核人员看的辅助解释，
+     不参与判定，也不该在已经自动定案的干净行上浪费本地算力。 -->
+<div id="flowResultsPanel" class="panel flex flex-col">
+    <div class="panel-head">
+        <h2 class="panel-title">
+            <i class="fa-solid fa-list-ul text-cyber-primary mr-2"></i>分类明细
+            <span class="ml-2 text-[10px] font-normal text-gray-500">逐行判定结果 · 按置信度升序（最可疑的在最前）</span>
+        </h2>
+        <div class="flex items-center gap-1" id="flowFilterGroup" title="仅切换下方的显示范围，不改变任何判定结果">
+            <button type="button" class="btn btn-ghost btn-sm is-active" data-flow-filter="all"
+                    title="显示本批次全部行">全部</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-flow-filter="auto"
+                    title="置信度 ≥ 高阈值：系统直接采信，不需要人工介入">自动处置</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-flow-filter="review"
+                    title="置信度落在低阈值与高阈值之间：建议人工确认一眼">待确认</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-flow-filter="manual"
+                    title="置信度低于低阈值，或属于分布外流量（模型对归类没把握）：必须人工定案">人工复核</button>
+        </div>
+    </div>
+    <!-- 按钮语义说明：过去只有「自动处置 / 待确认 / 人工复核」三个词，没有阈值口径，
+         用户无法判断它们到底是过滤器还是动作，也不知道某个档位为什么落进来。 -->
+    <p id="flowResultsHint" class="px-4 pt-3 pb-1 text-[11px] leading-relaxed text-gray-500">
+        四个按钮是<b class="text-gray-300">筛选视图</b>，只改显示范围、不改判定。档位由上方两个阈值划分：
+        置信度 ≥ 高阈值 → <b class="text-cyber-success">自动处置</b>（直接采信）；
+        介于低/高阈值之间 → <b class="text-cyber-warning">待确认</b>（建议人工确认）；
+        低于低阈值或属分布外 → <b class="text-cyber-danger">人工复核</b>（必须人工定案）。
+        「AI 分析」只对后两档开放，给复核人做特征偏离解释，不参与判定。
+    </p>
+    <div class="overflow-x-auto flex-1">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="text-left text-xs uppercase tracking-wider text-gray-500 border-b"
+                    style="border-color: var(--ds-border);">
+                    <th class="px-4 py-2.5 font-medium">行号</th>
+                    <th class="px-4 py-2.5 font-medium">预测类型</th>
+                    <th class="px-4 py-2.5 font-medium">置信度</th>
+                    <th class="px-4 py-2.5 font-medium">风险档位</th>
+                    <th class="px-4 py-2.5 font-medium">概率分布</th>
+                    <th class="px-4 py-2.5 font-medium">操作</th>
+                </tr>
+            </thead>
+            <tbody id="flowResultsBody">
+                <tr>
+                    <td colspan="6" class="text-center text-gray-500 py-10">暂无数据，请上传 CSV 开始分类</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- AI 分析结果：点某一行后填充，固定在表格下方，避免每次都弹窗打断复核节奏 -->
+    <div id="flowAiPanel" class="hidden px-4 py-3 border-t"
+         style="border-color: var(--ds-border); background: var(--ds-bg-subtle, rgba(255,255,255,0.02));">
+        <div class="flex items-start justify-between gap-3 mb-1.5">
+            <div class="flex items-center gap-2">
+                <i class="fa-solid fa-robot text-cyber-primary text-xs"></i>
+                <span class="text-xs font-medium text-gray-200">复核辅助分析</span>
+                <span id="flowAiMeta" class="text-[10px] text-gray-500 font-mono"></span>
+            </div>
+            <button type="button" id="flowAiClose" class="text-gray-500 hover:text-gray-300 text-xs">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+        <p id="flowAiContent" class="text-xs text-gray-300 leading-relaxed whitespace-pre-wrap"></p>
+        <p class="text-[10px] text-gray-600 mt-1.5">
+            LLM 辅助分析，仅供参考，不参与判定。判定结果仍以上方模型输出为准。
+        </p>
+    </div>
+
+    <div class="px-4 py-2 text-xs text-gray-500" id="flowResultsFoot"></div>
+</div>

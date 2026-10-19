@@ -30,13 +30,17 @@ def main():
 
     parser.add_argument('--data-root', type=str, default=default_data_root,
                         help="包含 Benign 和 Malware 文件夹的数据集根目录")
-    parser.add_argument('--dataset', type=str, default=None, choices=['ustc', 'ics', 'mixed', 'combined'],
-                        help="使用预定义数据集路径：ustc|ics|mixed|combined。若同时指定 --data-root，优先使用 --data-root。")
+    parser.add_argument('--dataset', type=str, default=None,
+                        choices=['ustc', 'ics', 'mixed', 'combined', 'joint'],
+                        help="使用预定义数据集路径：ustc|ics|mixed|combined|joint（USTC+ICS 联合）。"
+                             "若同时指定 --data-root，优先使用 --data-root。")
     parser.add_argument('--epochs', type=int, default=50, help="每个模型的训练轮数")
     parser.add_argument('--batch-size', type=int, default=32, help="批次大小")
     parser.add_argument('--lr', type=float, default=0.001, help="学习率")
+    # MLP 也在 models_to_train 里，但 choices 之前漏了它，导致 --model MLP 直接报错、
+    # 只能靠 --model all 顺带训练。
     parser.add_argument('--model', type=str, default='all',
-                        choices=['all', 'CNN_BiLSTM', 'Classic_CNN', 'Lightweight_CNN_BiLSTM', 'Pure_BiLSTM', 'Transformer'],
+                        choices=['all', 'CNN_BiLSTM', 'Classic_CNN', 'Lightweight_CNN_BiLSTM', 'Pure_BiLSTM', 'MLP', 'Transformer'],
                         help="指定要训练的模型名称，默认为全部")
     parser.add_argument('--cache-dir', type=str, default=None, help="特征缓存目录，默认使用 <data-root>/.feature_cache")
     parser.add_argument('--no-cache', action='store_true', help="禁用特征缓存（每次都从PCAP重新提取）")
@@ -48,6 +52,24 @@ def main():
     parser.add_argument('--loss-function', type=str, default='ce', choices=['ce', 'focal'],
                         help="训练损失函数：ce=CrossEntropyLoss, focal=FocalLoss")
     parser.add_argument('--focal-gamma', type=float, default=2.0, help="Focal Loss 的 gamma 参数")
+    # 跨域泛化的三个开关（2026-10-16 加）：联合数据集 + 会话级增强 + 模型选择指标。
+    # 动机：同源测试集上 6 个模型都 99.9%，只有换到外部数据集才能看出差距。
+    parser.add_argument('--augment', action='store_true',
+                        help="对训练集启用会话级数据增强（抖动/缩放/丢包/时间平移，仅 train 生效）")
+    parser.add_argument('--augment-strength', type=str, default='light', choices=['light', 'medium'],
+                        help="数据增强强度（light 温和；medium 更强但可能压准确率）")
+    parser.add_argument('--selection-metric', type=str, default='accuracy',
+                        choices=['accuracy', 'f1', 'macro_f1', 'balanced_accuracy', 'recall_malware'],
+                        help="用哪个验证集指标挑选 best 权重。同源验证集上 accuracy 很快饱和，"
+                             "所有模型看起来一样好；做跨域泛化实验建议用 f1 或 macro_f1。")
+    # 训练效率相关的开关：实测 6 个模型几乎都在第 1 轮验证集就到 99.9%+，
+    # 没有早停/降频的话后面 40 多轮纯属白跑。
+    parser.add_argument('--early-stop-patience', type=int, default=5,
+                        help="验证集连续多少轮无提升就早停，0 表示关闭（默认 5）")
+    parser.add_argument('--val-every', type=int, default=1,
+                        help="每多少轮做一次验证（默认 1；设为 2 表示隔轮验证，可省一半推理开销）")
+    parser.add_argument('--amp', action='store_true',
+                        help="启用混合精度训练（默认关闭：实测本机 4070 上 AMP 会让训练在第 5-7 轮静默崩溃）")
     args = parser.parse_args()
 
     data_root = os.path.abspath(args.data_root)
@@ -67,7 +89,8 @@ def main():
             'ustc': os.path.join(project_root, 'data', 'USTC-TFC2016-master'),
             'ics': os.path.join(parent_root, 'ICS-Pcaps-master'),
             'mixed': os.path.join(project_root, 'data', 'mixed_train_pcap'),
-            'combined': os.path.join(project_root, 'data', 'combined_train_pcap')
+            'combined': os.path.join(project_root, 'data', 'combined_train_pcap'),
+            'joint': os.path.join(project_root, 'data', 'joint_train')
         }
         chosen = mapped.get(args.dataset)
         if os.path.abspath(args.data_root) == os.path.abspath(default_data_root):
@@ -90,7 +113,9 @@ def main():
         cache_dir=args.cache_dir,
         use_cache=not args.no_cache,
         rebuild_cache=args.rebuild_cache,
-        cache_compress=args.cache_compress
+        cache_compress=args.cache_compress,
+        augment=args.augment,
+        augment_strength=args.augment_strength,
     )
 
     if train_loader is None or len(train_loader) == 0:
@@ -170,6 +195,9 @@ def main():
             'num_classes': num_classes,
             'loss_function': args.loss_function,
             'focal_gamma': args.focal_gamma,
+            'augment': bool(args.augment),
+            'augment_strength': args.augment_strength if args.augment else None,
+            'selection_metric': args.selection_metric,
         }
 
         trained_model, _, _ = train_model(
@@ -181,7 +209,11 @@ def main():
             optimizer=optimizer,
             num_epochs=args.epochs,
             device=str(device),
-            config=config
+            config=config,
+            early_stopping_patience=args.early_stop_patience,
+            use_amp=args.amp,
+            val_every=args.val_every,
+            selection_metric=args.selection_metric,
         )
 
         print(f"\n-> [{model_name}] 训练完成，正在保存模型权重至 {save_path} ...")

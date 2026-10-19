@@ -1,4 +1,6 @@
-<!-- 顶栏：页面标题 + 常驻抓包控制。抓包状态不隶属于任何一个页面，任意页面都能开始/停止。 -->
+<!-- 顶栏：页面标题 + 运行配置 + 常驻抓包控制。
+     抓包状态与运行配置都不隶属于任何一个页面，任意页面都能操作，
+     所以放在顶栏而不是某一页的卡片里。 -->
 <header class="app-topbar">
     <div>
         <div class="app-page-title">{{ page_title }}</div>
@@ -6,10 +8,55 @@
     </div>
 
     <div class="app-capture">
+        <!-- 运行配置：推理模型、检测模式。原先占着 KPI 带的后两格，
+             让「读数区」里混进了两个控件。现在收进浮层，KPI 带只留指标。 -->
+        <div class="app-cfg">
+            <button id="runtimeCfgBtn" type="button" class="btn btn-sm btn-ghost"
+                    aria-expanded="false" aria-controls="runtimeCfgPop"
+                    title="推理模型与检测模式">
+                <i class="fa-solid fa-sliders"></i><span>运行配置</span>
+            </button>
+
+            <div id="runtimeCfgPop" class="runtime-pop" role="dialog"
+                 aria-label="运行配置" hidden>
+                <div class="runtime-pop-head">
+                    <span class="text-gray-100">运行配置</span>
+                    <span>切换即生效</span>
+                </div>
+
+                <div class="cfg-row">
+                    <div class="cfg-label"><i class="fa-solid fa-microchip"></i>推理模型</div>
+                    <div id="modelSelectorBox">
+                        <select id="modelSelector" title="选择检测模型" aria-label="选择检测模型" class="select-field font-mono">
+                            <option value="cascade" selected>级联检测（默认 · 单模型优先 · 低置信自动升级 6 模型）</option>
+                            <option value="pure_bilstm">Pure BiLSTM（纯时序基线）</option>
+                            <option value="cnn_bilstm">CNN-BiLSTM（CNN + 双向时序）</option>
+                            <option value="classic_cnn">Classic CNN（经典卷积）</option>
+                            <option value="lightweight_cnn">Lightweight CNN-BiLSTM（轻量化）</option>
+                            <option value="mlp">MLP（多层感知机基线）</option>
+                            <option value="transformer">Transformer（自注意力）</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="cfg-row">
+                    <div class="cfg-label"><i class="fa-solid fa-people-group"></i>检测模式</div>
+                    <label class="flex items-center gap-2 cursor-pointer select-none">
+                        <input id="votingModeToggle" type="checkbox"
+                               class="w-4 h-4 rounded border-cyber-border bg-cyber-bg cursor-pointer"
+                               style="accent-color: var(--ds-accent)">
+                        <span id="votingModeLabelText" class="text-[13px] text-gray-300">单模型选择已启用</span>
+                    </label>
+                    <div class="cfg-foot"><span id="activeModelBadge" class="mc-state">级联检测 · 低置信自动升级</span></div>
+                </div>
+            </div>
+        </div>
+
         <div id="captureState" class="app-capture-state">
             <span class="status-dot"></span>
             <span id="captureText">未抓包</span>
         </div>
+
         <button id="liveToggleBtn" class="btn btn-sm btn-primary" data-running="false"
                 title="开始或停止实时抓包">
             <i id="liveToggleIcon" class="fa-solid fa-play mr-1.5"></i><span id="liveToggleLabel">开始抓包</span>

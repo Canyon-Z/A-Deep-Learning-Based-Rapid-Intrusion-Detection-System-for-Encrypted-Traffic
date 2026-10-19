@@ -1,0 +1,14 @@
+<!-- 攻击类型分布：横向条形而不是饼图。六分类里各类数量差异很大（Benign 与 LOIC-UDP 能差两个
+     数量级），条形能同时读出绝对数量与相对占比，饼图在这种长尾分布下会挤成一条线。 -->
+<div id="flowClassPanel" class="panel flex flex-col">
+    <div class="panel-head">
+        <h2 class="panel-title">
+            <i class="fa-solid fa-chart-simple text-cyber-primary mr-2"></i>攻击类型分布
+        </h2>
+        <span class="panel-hint" id="flowClassHint">本次上传累计</span>
+    </div>
+    <div class="p-4 flex-1 flex flex-col justify-center min-h-[240px]">
+        <div id="flowClassBars" class="space-y-2.5"></div>
+        <p id="flowClassEmpty" class="text-sm text-gray-500 text-center py-6">暂无数据</p>
+    </div>
+</div>

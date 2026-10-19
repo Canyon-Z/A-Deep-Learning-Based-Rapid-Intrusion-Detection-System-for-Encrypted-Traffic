@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+
+{# 复核中心
+   上传检测（pcap 与流特征 CSV）和实时抓包里所有「待确认 / 人工复核」的流量都汇总到
+   这一页。过去只有实时页侧栏有一个待复核队列，上传链路判出来的可疑流量无处处置，
+   而且离开实时页就看不见了。 #}
+{% block content %}
+<div class="grid-12">
+    <div class="col-12">
+        <div class="panel">
+            <div class="panel-head">
+                <h2 class="panel-title">
+                    <i class="fa-solid fa-clipboard-check text-cyber-primary mr-2"></i>复核队列
+                </h2>
+                <span class="panel-hint" id="reviewQueueHint">0 待复核 · 0 已处理</span>
+            </div>
+
+            <div class="px-4 pb-3 flex flex-wrap items-center gap-3">
+                <div class="review-stat">
+                    <span class="review-stat-label">待复核</span>
+                    <span class="review-stat-value" id="reviewStatPending">0</span>
+                </div>
+                <div class="review-stat">
+                    <span class="review-stat-label">确认攻击</span>
+                    <span class="review-stat-value is-attack" id="reviewStatMalicious">0</span>
+                </div>
+                <div class="review-stat">
+                    <span class="review-stat-label">确认误报</span>
+                    <span class="review-stat-value is-benign" id="reviewStatBenign">0</span>
+                </div>
+                <div class="review-stat">
+                    <span class="review-stat-label">忽略</span>
+                    <span class="review-stat-value" id="reviewStatIgnore">0</span>
+                </div>
+            </div>
+
+            <div class="px-4 pb-3 flex flex-wrap items-center gap-2">
+                <label class="text-[11px] text-gray-500" for="reviewPolicySelect">默认处置</label>
+                <select id="reviewPolicySelect" class="review-select"
+                        title="决定新进队的流量要不要等人：人工复核 / 6 模型投票 / LLM 判断">
+                    <option value="manual" selected>人工复核（默认）</option>
+                    <option value="vote">默认 6 模型投票</option>
+                    <option value="llm">默认 LLM 判断</option>
+                </select>
+                <span class="text-[11px] text-gray-500" id="reviewPolicyHint">
+                    所有待复核流量都留在队列里，等人逐条点结论。
+                </span>
+            </div>
+
+            <div class="px-4 pb-4 flex flex-wrap items-center gap-2">
+                <label class="text-[11px] text-gray-500" for="reviewLlmLimit">批量条数</label>
+                <select id="reviewLlmLimit" class="review-select">
+                    <option value="3">3</option>
+                    <option value="5" selected>5</option>
+                    <option value="10">10</option>
+                </select>
+                <button type="button" id="reviewLlmSuggest" class="btn btn-ghost btn-sm"
+                        title="让本地 LLM 逐条给建议，结论不落库，等人工确认">
+                    <i class="fa-solid fa-wand-magic-sparkles mr-1.5"></i>LLM 给建议
+                </button>
+                <button type="button" id="reviewLlmApply" class="btn btn-primary btn-sm"
+                        title="让本地 LLM 直接定案：判定结果立即落库并从队列移除">
+                    <i class="fa-solid fa-robot mr-1.5"></i>LLM 自主处置
+                </button>
+                <button type="button" id="reviewQueueClear" class="btn btn-ghost btn-sm"
+                        title="清空待复核队列（已复核结论保留）">
+                    <i class="fa-solid fa-broom mr-1.5"></i>清空队列
+                </button>
+                <span class="text-[11px] text-gray-500" id="reviewLlmStatus">本地 LLM 未探测</span>
+            </div>
+
+            <!-- 离线横幅：LLM 没起来时，两个 LLM 按钮点了只会 503。
+                 进去就告诉用户「为什么不能用、怎么起来」，比让人碰一次壁更好。 -->
+            <div id="reviewLlmBanner" class="hidden mx-4 mb-4 rounded-lg px-3 py-2 flex items-start gap-2 text-[11.5px] leading-relaxed"
+                 style="background: rgba(244, 63, 94, 0.08); border: 1px solid rgba(244, 63, 94, 0.28);">
+                <i class="fa-solid fa-triangle-exclamation text-cyber-danger mt-0.5"></i>
+                <div class="flex-1">
+                    <div class="text-cyber-danger font-medium">本地 LLM 未在线</div>
+                    <div class="text-gray-400 mt-0.5" id="reviewLlmBannerHint">
+                        在 LM Studio 里打开 Server（默认 http://127.0.0.1:1234/v1），或用 DLIDS_LLM_URL 指向其它 OpenAI 兼容服务。
+                    </div>
+                </div>
+                <button type="button" id="reviewLlmRetry" class="btn btn-ghost btn-xs whitespace-nowrap"
+                        title="重新探测一次本地 LLM">
+                    <i class="fa-solid fa-rotate mr-1"></i>重新探测
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-8">
+        <div class="panel">
+            <div class="panel-head">
+                <h2 class="panel-title">待复核流量</h2>
+                <span class="panel-hint" id="reviewListHint">按可疑度降序</span>
+            </div>
+            <div class="px-4 pb-2 flex items-center gap-2" id="reviewSourceFilter">
+                <button type="button" class="filter-chip is-active" data-review-source="all">全部</button>
+                <button type="button" class="filter-chip" data-review-source="live">实时抓包</button>
+                <button type="button" class="filter-chip" data-review-source="upload">上传 pcap</button>
+                <button type="button" class="filter-chip" data-review-source="csv">流特征 CSV</button>
+            </div>
+
+            <!-- 批量工具条：复选框在多选后才出现操作，平时只说明「勾选后可批量」 -->
+            <div class="px-4 pb-2 flex flex-wrap items-center gap-2 border-b border-cyber-border/50">
+                <label class="flex items-center gap-1.5 text-[11.5px] text-gray-400 select-none cursor-pointer">
+                    <input type="checkbox" id="reviewSelectAll">
+                    <span>全选当前</span>
+                </label>
+                <span class="text-[11px] text-gray-500" id="reviewSelectionHint">未选中</span>
+                <button type="button" class="btn btn-ghost btn-xs" data-review-batch="malicious" disabled
+                        title="把选中的全部判为恶意并移出队列">
+                    <i class="fa-solid fa-triangle-exclamation mr-1"></i>批量确认攻击
+                </button>
+                <button type="button" class="btn btn-ghost btn-xs" data-review-batch="benign" disabled
+                        title="把选中的全部判为良性（误报）并移出队列">
+                    <i class="fa-solid fa-check mr-1"></i>批量确认误报
+                </button>
+                <button type="button" class="btn btn-ghost btn-xs" data-review-batch="ignore" disabled
+                        title="把选中的全部标记为忽略并移出队列">
+                    <i class="fa-solid fa-ban mr-1"></i>批量忽略
+                </button>
+                <button type="button" class="btn btn-ghost btn-xs" data-review-batch="llm" disabled
+                        title="让本地 LLM 对选中的条目逐条给判断（不落库）">
+                    <i class="fa-solid fa-wand-magic-sparkles mr-1"></i>批量交 LLM 判断
+                </button>
+            </div>
+
+            <div class="p-2 review-queue-list" id="reviewQueueList">
+                <div class="text-xs text-gray-500 text-center py-8">加载中…</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-4">
+        <div class="panel">
+            <div class="panel-head">
+                <h2 class="panel-title">
+                    <i class="fa-solid fa-brain text-cyber-primary mr-2"></i>LLM 判断
+                </h2>
+                <span class="panel-hint" id="reviewAiMeta">未调用</span>
+            </div>
+            <div class="p-4 pt-2 text-xs leading-relaxed text-gray-400" id="reviewAiContent">
+                点「LLM 给建议」让本地模型逐条给出判断与理由，或者对单条点「AI 判断」。
+                「LLM 自主处置」会把结论直接落库并从队列移除。
+            </div>
+        </div>
+
+        <div class="panel mt-4">
+            <div class="panel-head">
+                <h2 class="panel-title">校准数据</h2>
+            </div>
+            <div class="p-4 pt-2">
+                <button type="button" id="reviewExportCalib" class="btn btn-ghost btn-sm">
+                    <i class="fa-solid fa-download mr-1.5"></i>导出实时校准数据
+                </button>
+                <p class="mt-2 text-[11px] leading-relaxed text-gray-500">
+                    把当前抓到的本机流量导成 CSV（本机流量标 Benign + 六类锚点样本），
+                    到「流量分类」页做环境校准。抓 30~60 秒后导出更有代表性。
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12">
+        <div class="panel">
+            <div class="panel-head">
+                <h2 class="panel-title">已复核结论</h2>
+                <span class="panel-hint" id="reviewHistoryHint">0 条</span>
+            </div>
+            <div class="px-4 pb-2">
+                <button type="button" id="reviewClearHistory" class="btn btn-ghost btn-xs">
+                    清空已复核记录
+                </button>
+            </div>
+            <div class="p-2 review-queue-list" id="reviewHistoryList">
+                <div class="text-xs text-gray-500 text-center py-8">还没有复核记录</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

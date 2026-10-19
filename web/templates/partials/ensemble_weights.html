@@ -1,0 +1,46 @@
+{% raw %}
+<!-- 分域投票权重：六个模型在不同数据域上的能力差得很多（工业域 MLP 的 F1 只有 0.10，
+     Pure BiLSTM 是 51.19），等权投票等于让失手的模型和最强的模型投同样重的一票。
+     这张表把「权重凭什么这么定」直接摊开：每格上面是归一化权重，下面是该域的实测指标。 -->
+<section id="ensembleWeightSection">
+    <div class="panel">
+        <div class="panel-head">
+            <h2 class="panel-title">
+                <i class="fa-solid fa-scale-balanced text-cyber-primary mr-2"></i>分域投票权重
+            </h2>
+            <span class="panel-hint" id="ewModeHint">读取中…</span>
+        </div>
+
+        <div class="ew-toolbar">
+            <span class="ew-toolbar-label">加权开关</span>
+            <div class="filter-row" id="ewModeGroup">
+                <button type="button" class="filter-chip is-active" data-ew-mode="off">等权（默认）</button>
+                <button type="button" class="filter-chip" data-ew-mode="domain">按域加权</button>
+            </div>
+            <span class="ew-toolbar-note" id="ewModeNote">切换即时生效，下一次推理即用新权重，不需要重启。</span>
+        </div>
+
+        <div class="px-2">
+            <table class="cmp-table" id="ewTable">
+                <thead>
+                    <tr>
+                        <th>模型</th>
+                        <th>同源<span class="ew-col-sub">USTC-TFC2016</span></th>
+                        <th>工业控制<span class="ew-col-sub">test_ics</span></th>
+                        <th>CSE 加密流量<span class="ew-col-sub">CIC-IDS2018</span></th>
+                    </tr>
+                </thead>
+                <tbody id="ewTableBody">
+                    <tr><td colspan="4" class="ew-loading">正在读取评估产物…</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p class="ew-footnote" id="ewFootnote">
+            权重 = <code>max(该域实测 F1, 1.0)</code> 后按均值归一化到「均值 = 1」，只改模型之间的相对分量，
+            不改整体票量尺度。用 F1 而不是准确率：工业域是 45497:4 的极端不平衡集，
+            全部判成良性也能拿到 99.91% 的准确率，只有 F1 反映真实检出能力。
+        </p>
+    </div>
+</section>
+{% endraw %}

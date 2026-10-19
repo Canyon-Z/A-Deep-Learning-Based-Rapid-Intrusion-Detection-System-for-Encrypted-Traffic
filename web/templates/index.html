@@ -8,6 +8,9 @@
     <div class="col-4">
         {% include "partials/threat_chart.html" %}
     </div>
+    <!-- 第二行：系统运行态(4) + 最近告警(8)。两张卡都由 partial 内部自带 .col-* 包裹，
+         因为 .grid-12 只对直接子元素生效，外层再套一层 div 会让它退化成普通块。 -->
+    {% include "partials/overview_cards.html" %}
     <div class="col-12">
         {% with result_title='最近检测记录', result_hint='上传与实时抓包合并显示，按时间倒序', result_mode='all', result_clear_label='清除全部' %}
             {% include "partials/results_table.html" %}

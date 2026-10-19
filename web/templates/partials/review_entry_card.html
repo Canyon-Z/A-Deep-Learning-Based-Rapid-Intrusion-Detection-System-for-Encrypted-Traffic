@@ -1,0 +1,21 @@
+<!-- 复核入口
+     上传检测与实时抓包都会产出「待确认 / 人工复核」的流量，两条链路共用后端同一份
+     复核队列（`live_review_queue`）。这里只做入口与计数，真正的处置在 /review。 -->
+<div class="panel mt-4" id="reviewEntryPanel">
+    <div class="panel-head">
+        <h2 class="panel-title">
+            <i class="fa-solid fa-clipboard-check text-cyber-primary mr-2"></i>待复核队列
+        </h2>
+        <span class="panel-hint" id="reviewEntryHint">0 条</span>
+    </div>
+    <div class="p-4 pt-2">
+        <p class="text-xs leading-relaxed text-gray-500">
+            上传检测与实时抓包里所有「待确认 / 人工复核」的流量都汇总到复核中心，
+            可以让本地 LLM 先给出判断建议，也可以逐条人工定案。
+        </p>
+        <a href="/review" id="reviewEntryLink"
+           class="btn btn-primary btn-sm inline-flex items-center gap-2 mt-3">
+            <i class="fa-solid fa-arrow-right-to-bracket"></i><span>前往复核中心</span>
+        </a>
+    </div>
+</div>

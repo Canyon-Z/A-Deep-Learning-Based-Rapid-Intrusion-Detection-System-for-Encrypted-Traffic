@@ -1,0 +1,166 @@
+<!-- 总览页第二行：系统运行态 + 最近告警
+     为什么要加这两张卡：总览页原先只有「趋势 / 威胁分布 / 最近记录」三块，
+     空态时内容只占上半屏，剩下大半是背景。缺的不是更多图表，而是两个用户每次进来
+     第一眼要确认的事实——「系统现在是好的吗」「有没有需要我处理的告警」。
+     数据都来自已有接口与已有记录，不新增后端路由、不新增统计口径：
+       /model-status  → 模型就绪 / 集成就绪 / 类别数 / 缺失项
+       recordStores   → 已经判定为恶意的记录（与表格同一份数据）
+-->
+<div class="col-4">
+    <div class="panel flex flex-col" id="sysStatusPanel">
+        <div class="panel-head">
+            <h2 class="panel-title">
+                <i class="fa-solid fa-heart-pulse text-cyber-primary mr-2"></i>系统运行态
+            </h2>
+            <span class="panel-hint">当前进程</span>
+        </div>
+        <div class="p-4 sys-list">
+            <div class="sys-row">
+                <span class="sys-label"><span id="sysDotLoaded" class="sys-dot"></span>模型就绪</span>
+                <span id="sysLoaded" class="sys-value">--</span>
+            </div>
+            <div class="sys-row">
+                <span class="sys-label"><span id="sysDotEnsemble" class="sys-dot"></span>集成投票</span>
+                <span id="sysEnsemble" class="sys-value">--</span>
+            </div>
+            <div class="sys-row">
+                <span class="sys-label"><span id="sysDotClasses" class="sys-dot"></span>判定类别</span>
+                <span id="sysClasses" class="sys-value">--</span>
+            </div>
+            <div class="sys-row">
+                <span class="sys-label"><span id="sysDotMissing" class="sys-dot"></span>缺失模型</span>
+                <span id="sysMissing" class="sys-value">--</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="col-8">
+    <div class="panel flex flex-col" id="alertPanel">
+        <div class="panel-head">
+            <h2 class="panel-title">
+                <i class="fa-solid fa-bell text-cyber-primary mr-2"></i>最近告警
+            </h2>
+            <span class="panel-hint">只列恶意判定</span>
+        </div>
+        <div class="p-4 alert-body">
+            <div id="alertList" class="alert-list"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 这一段只做两件事：把 /model-status 读成四行状态、把记录里已判定为恶意的条目
+    // 摘成一张列表。恶意判定沿用 results_impl.js 的同一套规则（status 字段 + OOD 排除），
+    // 不另写一套，否则同一份记录在卡片和表格里会给出不同结论。
+    (function () {
+        var ALERT_LIMIT = 5;
+
+        function setRow(valueId, dotId, text, tone) {
+            var valueEl = document.getElementById(valueId);
+            if (valueEl) valueEl.textContent = text;
+            var dotEl = document.getElementById(dotId);
+            if (dotEl) {
+                dotEl.className = 'sys-dot' + (tone ? ' is-' + tone : '');
+            }
+        }
+
+        function loadModelStatus() {
+            fetch('/model-status', { credentials: 'same-origin' })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    var loaded = Number(d.loaded_count) || 0;
+                    var expected = Number(d.expected_count) || 0;
+                    var missing = Array.isArray(d.missing_models) ? d.missing_models : [];
+                    var classes = Array.isArray(d.classes) ? d.classes : [];
+                    var ready = !!d.ensemble_ready;
+
+                    // 二分类模型这里就是 Benign / Malware 两个名字。只报「2 类」会被读成
+                    // 「六分类只加载了 2 个」，直接给名字更不容易误会。
+                    var classNameText = classes.length
+                        ? (classes.length <= 3 ? classes.join(' / ') : classes.length + ' 类')
+                        : '--';
+                    setRow('sysLoaded', 'sysDotLoaded', loaded + ' / ' + expected, ready ? 'ok' : (loaded ? 'warn' : 'warn'));
+                    setRow('sysEnsemble', 'sysDotEnsemble', ready ? '就绪' : '未就绪', ready ? 'ok' : 'warn');
+                    setRow('sysClasses', 'sysDotClasses', classNameText, classes.length ? 'ok' : 'warn');
+                    setRow('sysMissing', 'sysDotMissing', missing.length ? missing.join('、') : '无', missing.length ? 'warn' : 'ok');
+                })
+                .catch(function () {
+                    setRow('sysLoaded', 'sysDotLoaded', '读取失败', 'warn');
+                });
+        }
+
+        function escapeHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        function shortTime(raw) {
+            var text = String(raw == null ? '' : raw);
+            // 记录里的时间可能是 '18:44:02'、'2026-10-20 18:44:02' 或 ISO 串，
+            // 卡片只要时分秒；认不出来就原样显示，别把它吞成 '--'。
+            var m = text.match(/(\d{1,2}:\d{2}(?::\d{2})?)/);
+            return m ? m[1] : (text || '--');
+        }
+
+        function collectAlerts() {
+            var stores = window.recordStores || {};
+            var picked = [];
+            ['upload', 'live'].forEach(function (kind) {
+                var list = Array.isArray(stores[kind]) ? stores[kind] : [];
+                list.forEach(function (entry) {
+                    var data = (entry && entry.data) || {};
+                    var status = data.status ? String(data.status) : '';
+                    var isOod = status.indexOf('Out-of-Distribution') >= 0 || data.reliability === 'out_of_domain';
+                    var isMal = !isOod && (status.indexOf('Malicious') >= 0 || status.indexOf('Malware') >= 0);
+                    if (!isMal) return;
+                    picked.push({ kind: kind, entry: entry, data: data });
+                });
+            });
+            return picked.slice(Math.max(0, picked.length - ALERT_LIMIT)).reverse();
+        }
+
+        function renderAlerts() {
+            var host = document.getElementById('alertList');
+            if (!host) return;
+            var alerts = collectAlerts();
+            if (!alerts.length) {
+                host.innerHTML = ''
+                    + '<div class="alert-empty">'
+                    + '  <i class="fa-regular fa-circle-check"></i>'
+                    + '  <p>本次运行还没有恶意告警</p>'
+                    + '  <span>检测到恶意流量后，这里按时间倒序列出最近 ' + ALERT_LIMIT + ' 条。</span>'
+                    + '</div>';
+                return;
+            }
+            var html = ''
+                // 表头跟着数据一起出：空态时不该看到一排没有内容的列名。
+                + '<div class="alert-head">'
+                + '  <span>时间</span><span>来源</span><span>文件</span><span>判定类别</span><span class="alert-head-right">置信度</span>'
+                + '</div>';
+            for (var i = 0; i < alerts.length; i++) {
+                var a = alerts[i];
+                var conf = a.data.confidence || a.data.conf || a.data.malware_conf;
+                var confText = conf ? (parseFloat(conf) * 100).toFixed(1) + '%' : '--';
+                var cls = a.data.threat || a.data.threat_class || a.data.predicted_label || a.data.prediction || 'Malware';
+                html += ''
+                    + '<div class="alert-item">'
+                    + '  <span class="alert-time">' + escapeHtml(shortTime(a.entry.time)) + '</span>'
+                    + '  <span class="src-badge">' + (a.kind === 'live' ? '实时' : '上传') + '</span>'
+                    + '  <span class="alert-name" title="' + escapeHtml(a.entry.name) + '">' + escapeHtml(a.entry.name || '未命名') + '</span>'
+                    + '  <span class="alert-class">' + escapeHtml(cls) + '</span>'
+                    + '  <span class="alert-conf">' + confText + '</span>'
+                    + '</div>';
+            }
+            host.innerHTML = html;
+        }
+
+        window.dlidsRenderOverviewPanels = renderAlerts;
+        loadModelStatus();
+        renderAlerts();
+        // 记录是从后端 / localStorage 异步恢复的，首次渲染时可能还是空的；
+        // 再补一次即可，之后由 dlidsRenderStats 的钩子保持同步。
+        setTimeout(renderAlerts, 1200);
+    })();
+</script>

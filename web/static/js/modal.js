@@ -171,7 +171,7 @@
         try { modalBarChart.resize(); } catch(e){}
     }
 
-    function showDetails_impl(name, result, conf, execTime, captureTime, imageData, payloadDist, flows, sessionParseReport) {
+    function showDetails_impl(name, result, conf, execTime, captureTime, imageData, payloadDist, flows, sessionParseReport, extra) {
         try {
             const modal = document.getElementById('detailModal');
             if (!modal) return;
@@ -323,9 +323,20 @@
                                         ? window.getModelDisplayName(modelId)
                                         : modelId;
                                     const predicted = detail && detail.predicted_label ? detail.predicted_label : '-';
-                                    const malConfRaw = detail && detail.malware_confidence ? parseFloat(detail.malware_confidence) : NaN;
-                                    const malConfText = Number.isFinite(malConfRaw) ? `${(malConfRaw * 100).toFixed(1)}%` : '-';
-                                    return `<div>${escapeHtml(modelName)}: ${escapeHtml(predicted)} (${malConfText})</div>`;
+                                    // 置信度必须是「判定那一类」的概率。原来恒取 malware_confidence，
+                                    // 于是判 Benign 的模型全都显示成 Benign (0.0%) —— 读起来像「拿不准」，
+                                    // 实际是「很确定是良性」（benign_confidence 接近 1）。
+                                    const malRaw = detail ? parseFloat(detail.malware_confidence) : NaN;
+                                    const benRaw = detail ? parseFloat(detail.benign_confidence) : NaN;
+                                    const votedMalware = /^mal/i.test(String(predicted)) || String(predicted) === 'Malicious';
+                                    const confRaw = votedMalware
+                                        ? malRaw
+                                        : (Number.isFinite(benRaw) ? benRaw : (Number.isFinite(malRaw) ? 1 - malRaw : NaN));
+                                    const confText = Number.isFinite(confRaw) ? `${(confRaw * 100).toFixed(1)}%` : '-';
+                                    // malware 概率仍然带出来：判良性时它才是「这一票有多不情愿」的依据。
+                                    const malText = Number.isFinite(malRaw) ? `${(malRaw * 100).toFixed(1)}%` : '-';
+                                    const title = `恶意概率 ${malText} · 阈值 ${detail && detail.threshold != null ? detail.threshold : '-'}`;
+                                    return `<div title="${escapeHtml(title)}">${escapeHtml(modelName)}: ${escapeHtml(predicted)} (${confText})</div>`;
                                 }).join('');
                                 voteDetailHtml = `<div class="text-[10px] text-cyan-300 mt-1">投票明细:${voteLines}</div>`;
                             }
@@ -354,10 +365,106 @@
             }
 
             setTimeout(initModalChart_impl, 120);
+            renderEvidence(extra);
         } catch (e) {
             console.warn('showDetails failed', e);
             alert('显示详情失败: ' + (e && e.message ? e.message : String(e)));
         }
+    }
+
+    // 加权取证：回答「这次到底有没有用域加权、域分数从哪来、票僵持到什么程度」。
+    // 这些值早就在 /analyze 的响应里（ensemble_weighting / distribution / reliability），
+    // 但界面上一直没有出口，用户只能靠「恶意占比没变」去猜，等于不可观测。
+    function renderEvidence(extra) {
+        const box = document.getElementById('modalEvidence');
+        const body = document.getElementById('modalEvidenceBody');
+        const modeEl = document.getElementById('modalEvidenceMode');
+        if (!box || !body) return;
+        const source = (extra && typeof extra === 'object') ? extra : {};
+        const ew = source.ensemble_weighting && typeof source.ensemble_weighting === 'object' ? source.ensemble_weighting : null;
+        const dist = source.distribution && typeof source.distribution === 'object' ? source.distribution : null;
+        if (!ew && !dist) {
+            box.classList.add('hidden');
+            body.innerHTML = '';
+            return;
+        }
+        box.classList.remove('hidden');
+
+        // 一行「键 → 值」，值里不放 HTML，统一走 escapeHtml。
+        const rows = [];
+        const push = (label, value) => rows.push(
+            '<div class="flex justify-between gap-3"><span class="text-gray-500">' + escapeHtml(label) +
+            '</span><span class="text-gray-300 break-all text-right">' + escapeHtml(value) + '</span></div>'
+        );
+
+        if (ew) {
+            const weighting = String(ew.weighting || 'uniform');
+            const score = Number(ew.domain_score);
+            const signals = ew.domain_signals && typeof ew.domain_signals === 'object' ? ew.domain_signals : {};
+            const weights = ew.weights_used && typeof ew.weights_used === 'object' ? ew.weights_used : null;
+            const sessions = Array.isArray(ew.sessions) ? ew.sessions : [];
+
+            if (modeEl) {
+                const tag = weighting === 'domain' ? '按域加权' : '等权（未加权）';
+                modeEl.textContent = Number.isFinite(score) ? (tag + ' · 域外分数 ' + score.toFixed(3)) : tag;
+            }
+
+            const portSig = Number(signals.port);
+            const distSig = Number(signals.dist);
+            if (Number.isFinite(portSig) || Number.isFinite(distSig)) {
+                const parts = [];
+                if (Number.isFinite(portSig)) parts.push('端口 ' + portSig.toFixed(2));
+                if (Number.isFinite(distSig)) parts.push('距离 ' + distSig.toFixed(2));
+                push('域外信号', parts.join(' · ') || '-');
+            }
+            const batchDistance = Number(ew.batch_distance);
+            if (Number.isFinite(batchDistance)) {
+                const threshold = Number(ew.distance_threshold);
+                push('批马氏距离', threshold > 0
+                    ? batchDistance.toFixed(3) + ' / 阈值 ' + threshold.toFixed(3) + '（' + (batchDistance / threshold).toFixed(2) + '×）'
+                    : batchDistance.toFixed(3));
+            }
+
+            // 权重是否真的偏离 1.0 —— 这是「加权有没有生效」最直接的证据。
+            if (weights) {
+                const entries = Object.keys(weights).map((k) => [k, Number(weights[k])]).filter(([, v]) => Number.isFinite(v));
+                if (entries.length) {
+                    const maxDev = entries.reduce((m, [, v]) => Math.max(m, Math.abs(v - 1)), 0);
+                    const top = entries.slice().sort((a, b) => b[1] - a[1])[0];
+                    const low = entries.slice().sort((a, b) => a[1] - b[1])[0];
+                    push('实际权重', maxDev < 1e-6
+                        ? '全为 1.000（等同等权）'
+                        : (low[0] + ' ' + low[1].toFixed(3) + ' … ' + top[0] + ' ' + top[1].toFixed(3)));
+                }
+            } else {
+                push('实际权重', '全为 1.000（等同等权）');
+            }
+
+            if (sessions.length) {
+                const maxContest = sessions.reduce((m, s) => Math.max(m, Number((s && s.contest) || 0)), 0);
+                const adjusted = sessions.filter((s) => s && s.adjust && Number(s.adjust.blend) > 0).length;
+                const strength = Number(ew.contest_strength);
+                push('模型分歧', maxContest.toFixed(2)
+                    + (Number.isFinite(strength) ? '（介入门槛 ' + strength.toFixed(2) + '）' : '')
+                    + ' · 调权会话 ' + adjusted + '/' + sessions.length);
+            }
+        }
+
+        if (dist) {
+            const parts = [];
+            const iec = Number(dist.industrial_ratio);
+            const fec = Number(dist.foreign_ratio);
+            if (Number.isFinite(iec)) parts.push('工控 ' + iec.toFixed(1) + '%');
+            if (Number.isFinite(fec)) parts.push('外部协议 ' + fec.toFixed(1) + '%');
+            if (parts.length) push('协议占比', parts.join(' · '));
+        }
+
+        const reliability = String(source.reliability || '').trim();
+        if (reliability && reliability !== 'ok') {
+            push('判定可信度', reliability === 'out_of_domain' ? 'out_of_domain（分布外，结论不可采信）' : reliability);
+        }
+
+        body.innerHTML = rows.join('');
     }
 
     // export

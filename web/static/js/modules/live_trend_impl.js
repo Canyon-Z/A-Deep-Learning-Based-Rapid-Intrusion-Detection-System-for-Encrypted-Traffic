@@ -22,16 +22,28 @@
         // （uploadTrendImpl 在维护）。实时数据若也往同一张图上写，两个口径会互相覆盖 —— 用户在
         // 上传页停留时趋势会因为后台抓包而跳变。实时页的主角是主机辐射图，本来就没有折线图。
         if (!document.getElementById('liveFlowGraph')) return null;
+        if (!lineChartBelongsToLive()) return null;
         const dom = document.getElementById('lineChart');
         if (!dom) return null;
         window.liveTrendChart = window.uploadTrendChart || echarts.init(dom, window.DLIDS_CHART_THEME || null);
         return getLineChart();
     }
 
+    // 「检测工作台」把上传与实时并到了一页，页面上只有一个 #lineChart，而它的 data-trend-scope
+    // 写的是 upload —— 实时这一路必须让出这个容器，否则抓包数据会盖掉上传趋势曲线
+    // （旧守卫「没有 #liveFlowGraph 才画」在实时子视图里恰好失效）。
+    function lineChartBelongsToLive() {
+        const dom = document.getElementById('lineChart');
+        if (!dom) return false;
+        const scope = dom.getAttribute('data-trend-scope');
+        return !scope || scope === 'live';
+    }
+
     function renderCharts() {
         const state = getState();
         const lineChart = getLineChart();
-        if (lineChart) {
+        // 容器归属不是实时这一路就只更新内存状态、不动画布（见 lineChartBelongsToLive）
+        if (lineChart && lineChartBelongsToLive()) {
             lineChart.setOption({ xAxis: { data: state.labels }, series: [{ data: state.benign }, { data: state.malware }] });
         }
     }
