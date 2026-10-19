@@ -41,7 +41,8 @@
 │   ├── templates/            # Jinja2 HTML 模板
 │   └── static/               # 前端静态资源
 ├── checkpoints/              # 训练好的模型权重 (.pth)
-├── tools/                    # 辅助脚本（测试集提取、数据划分检查）
+├── tools/                    # 辅助脚本（测试集提取、数据划分检查、
+│                             #   端到端自检、实时/离线输入一致性验证）
 ├── run.py                    # 项目入口，启动 Web 服务
 └── requirements.txt
 ```
