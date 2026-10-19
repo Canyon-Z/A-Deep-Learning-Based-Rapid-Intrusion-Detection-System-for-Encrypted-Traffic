@@ -8,6 +8,7 @@
     const PERSIST_DEBOUNCE_MS = 300; // debounce writes to localStorage
     const PERSIST_BACKOFF_MS = 60 * 1000; // backoff on quota error
     const SERVER_SYNC_DEBOUNCE_MS = 1500; // debounce writes to /api/records（比本地写慢一档，减少请求量）
+    const RECORDS_CLEARED_AT_KEY = 'recordsClearedAt'; // 上一次「清除记录」的时刻（秒），用来挡住服务端旧快照
 
     // ---- 服务端持久化（缺口 L2）----
     // 检测记录原先只存在 localStorage：换机器、换浏览器、清站点数据就全丢，
@@ -45,6 +46,47 @@
         }, SERVER_SYNC_DEBOUNCE_MS);
     }
 
+    // 「清除记录」必须立刻上行，不能等 1.5 秒防抖。
+    // 竞态是这样的：用户点清除 → 本地清空 → 用户立刻换页/刷新 → pullRecordStoresFromServer
+    // 读到的还是清除前那份服务端快照（serverRecords > localRecords）→ 覆盖回本地 →
+    // 刚清掉的记录又冒出来，看起来就是「清除日志按了没用」。
+    // 这里取消防抖立即 POST，配合下面的清除时刻校验，两端一起堵住这个窗口。
+    window.resultsImpl.pushRecordsNow = function(json) {
+        try {
+            const payload = typeof json === 'string' ? json : buildPersistableJson();
+            if (serverSyncTimer) {
+                clearTimeout(serverSyncTimer);
+                serverSyncTimer = null;
+            }
+            serverSyncPending = null;
+            if (typeof fetch !== 'function') return;
+            serverSyncInFlight = true;
+            fetch('/api/records', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                keepalive: true,
+                body: payload
+            }).then(function(r) { return r.ok ? r.json() : null; })
+              .then(function(res) {
+                  if (res && res.ok) window.resultsImpl._serverRecordsAt = res.updated_at || null;
+              })
+              .catch(function() { /* 离线/未登录：只用本地存储 */ })
+              .finally(function() { serverSyncInFlight = false; });
+        } catch (e) { /* ignore */ }
+    };
+
+    // 记下清除时刻：之后拉服务端记录时，早于这个时刻的快照一律不回填。
+    function markRecordsCleared() {
+        const at = Date.now() / 1000;
+        window.recordsClearedAt = at;
+        try {
+            if (window.localStorage && window.localStorage.setItem) {
+                window.localStorage.setItem(RECORDS_CLEARED_AT_KEY, String(at));
+            }
+        } catch (e) { /* 隐私模式下写不进去，只靠内存标记 */ }
+    }
+
     // 页面初始化时把服务端记录拉回来：本地为空、或服务端更新时间更晚，都以服务端为准。
     // 拉回后写进 localStorage 再走一遍 restoreRecordStores，让所有下游（趋势图、去重集合、
     // 卡片收敛）与刷新前完全一致。
@@ -55,6 +97,17 @@
                 .then(function(r) { return r.ok ? r.json() : null; })
                 .then(function(data) {
                     if (!data || data.storage !== 'server') return;
+                    // 刚清除过记录：服务端若还是清除前那份快照（updated_at 早于清除时刻），
+                    // 说明清除结果还没写上去，这份数据不能拿来覆盖本地 —— 否则「清除日志」
+                    // 会被下一次拉取原样回填，用户看到的就是「上传记录清不掉」。
+                    const clearedAt = Number(window.recordsClearedAt
+                        || (window.localStorage && window.localStorage.getItem
+                            ? window.localStorage.getItem(RECORDS_CLEARED_AT_KEY) : 0) || 0);
+                    if (clearedAt) {
+                        const serverAt = data.updated_at
+                            ? Date.parse(String(data.updated_at).replace(' ', 'T')) / 1000 : 0;
+                        if (!serverAt || serverAt < clearedAt) return;
+                    }
                     const live = Array.isArray(data.live) ? data.live : [];
                     const upload = Array.isArray(data.upload) ? data.upload : [];
                     if (!live.length && !upload.length) return;
@@ -682,7 +735,12 @@
             }
 
             window.currentRecordFilter = 'all';
+            // 清除是「删数据」，必须立刻落到服务端：persistRecordStores 里的上行有 1.5 秒
+            // 防抖，用户在这段时间里换页或刷新，pullRecordStoresFromServer 会把清除前的
+            // 服务端快照拉回来，记录当场复活。先记清除时刻，再立即 POST。
+            markRecordsCleared();
             window.resultsImpl.persistRecordStores();
+            window.resultsImpl.pushRecordsNow();
 
             // 威胁类型分布卡片必须跟着一起清：它的计数来自按连接持久化的逐流明细
             // （dlids_threat_flows_upload），不清的话会出现「记录表空了、卡片还挂着 N 个连接」。
@@ -745,7 +803,10 @@
                 }).catch(function () {});
             } catch (e) {}
 
+            // 与上传一并处理：清除时刻先落盘，再立即上行（不吃 1.5 秒防抖）。
+            markRecordsCleared();
             window.resultsImpl.persistRecordStores();
+            window.resultsImpl.pushRecordsNow();
             try { if (typeof window.persistUiState === 'function') window.persistUiState(); } catch (e) {}
         } catch (e) {
             console.warn('resultsImpl.clearLiveRecords failed', e);

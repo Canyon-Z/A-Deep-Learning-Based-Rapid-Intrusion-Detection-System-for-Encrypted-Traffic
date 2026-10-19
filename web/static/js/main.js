@@ -1286,7 +1286,7 @@
     }
 
     // ==================== 模块加载器 ====================
-    const assetVersion = '20261103g';
+    const assetVersion = '20261103h';
     const modulePaths = [
         '/static/js/core/state.js?v=' + assetVersion,
         '/static/js/core/utils.js?v=' + assetVersion,
