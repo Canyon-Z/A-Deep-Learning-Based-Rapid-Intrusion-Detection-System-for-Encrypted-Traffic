@@ -468,19 +468,34 @@
         if (typeof window.dlidsRenderStats === 'function') window.dlidsRenderStats();
     };
 
-    // 清空当前页面的卡片明细（清除日志时调）。
-    // 同时记下清除时刻 —— 轮询会把早于它的流滤掉，刷新后也照样生效（落盘）。
-    window.dlidsClearThreatFlows = function (scopeArg) {
-        const scope = dlidsThreatScope();
-        if (!scope) return;
-        if (scopeArg && scopeArg !== scope) return;
+    // 清空某一个「真实」存储桶（upload / live）。聚合视图没有自己的存储，不能直接清。
+    function dlidsClearBucket(scope) {
         const b = dlidsBucket(scope);
-        if (!b) return;
+        if (!b || !b.def) return false;
         b.flows = [];
         b.meta = {};
         b.rowsTotal = 0;
         b.clearedAt = Date.now() / 1000;
         dlidsPersistBucket(b);
+        return true;
+    }
+
+    // 清空当前页面的卡片明细（清除日志时调）。
+    // 同时记下清除时刻 —— 轮询会把早于它的流滤掉，刷新后也照样生效（落盘）。
+    window.dlidsClearThreatFlows = function (scopeArg) {
+        const scope = dlidsThreatScope();
+        if (!scope) return;
+        // 聚合页（/dashboard、/records）的 scope 是 'all'，它只是 upload 与 live 的只读合并，
+        // 没有自己的存储桶。以前这里统一走 `scopeArg !== scope` 的早退，于是总览页点「清除全部」
+        // 传进来的 'upload' / 'live' 全被挡掉 —— 表格清了，威胁卡一直挂着旧连接。
+        if (scope === 'all') {
+            dlidsClearBucket('upload');
+            dlidsClearBucket('live');
+        } else if (!scopeArg || scopeArg === scope) {
+            dlidsClearBucket(scope);
+        } else {
+            return;
+        }
         if (window.dlidsStats) window.dlidsStats.threats = {};
         if (typeof window.dlidsRenderStats === 'function') window.dlidsRenderStats();
     };
@@ -502,12 +517,9 @@
     // 这里按记录表的连接集合过滤一次并把结果落盘，保证「卡片只显示本页面检测记录里的流量」。
     // 不用 proto 参与匹配：recordStores 里的行不一定带 protocol 字段，带上会导致全不匹配。
     // 记录表为空时直接返回 0：那多半是还没恢复完，不能据此把明细全删掉。
-    window.dlidsPruneThreatFlowsToConnections = function (scopeArg) {
-        const scope = dlidsThreatScope();
-        if (!scope) return 0;
-        if (scopeArg && scopeArg !== scope) return 0;
+    function dlidsPruneBucket(scope) {
         const b = dlidsBucket(scope);
-        if (!b) return 0;
+        if (!b || !b.def) return 0;
         const store = (window.recordStores && window.recordStores[scope]) || [];
         if (!store.length) return 0;
         const keep = new Set();
@@ -520,9 +532,23 @@
         if (list.length !== before) {
             b.flows = list;
             dlidsPersistBucket(b);
-            if (typeof window.dlidsRenderStats === 'function') window.dlidsRenderStats();
         }
         return before - list.length;
+    }
+
+    window.dlidsPruneThreatFlowsToConnections = function (scopeArg) {
+        const scope = dlidsThreatScope();
+        if (!scope) return 0;
+        // 聚合页同样没有自己的桶：两路各收敛一次（各自的记录表也不同源）。
+        if (scope === 'all') {
+            const removed = dlidsPruneBucket('upload') + dlidsPruneBucket('live');
+            if (removed && typeof window.dlidsRenderStats === 'function') window.dlidsRenderStats();
+            return removed;
+        }
+        if (scopeArg && scopeArg !== scope) return 0;
+        const removed = dlidsPruneBucket(scope);
+        if (removed && typeof window.dlidsRenderStats === 'function') window.dlidsRenderStats();
+        return removed;
     };
 
     // 进场即载入自己那一份存储
@@ -1260,7 +1286,7 @@
     }
 
     // ==================== 模块加载器 ====================
-    const assetVersion = '20261103f';
+    const assetVersion = '20261103g';
     const modulePaths = [
         '/static/js/core/state.js?v=' + assetVersion,
         '/static/js/core/utils.js?v=' + assetVersion,
